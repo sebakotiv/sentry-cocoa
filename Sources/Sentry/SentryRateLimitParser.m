@@ -10,7 +10,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 @implementation SentryRateLimitParser
 
-+ (NSDictionary<NSString *, NSDate *> *_Nonnull)parse:(NSString *)header {
+- (NSDictionary<NSString *, NSDate *> *_Nonnull)parse:(NSString *)header {
     
     NSMutableDictionary<NSString *, NSDate *> *rateLimits = [[NSMutableDictionary alloc] init];
     
@@ -18,11 +18,14 @@ NS_ASSUME_NONNULL_BEGIN
         return rateLimits;
     }
     
+    // The header might contain whitespaces and they must be ignored.
     NSString *headerNoWhitespaces = [self removeAllWhitespaces:header];
     
-    NSArray<NSString *> *quotas = [headerNoWhitespaces componentsSeparatedByString:@","];
-    for (NSString* quota in quotas) {
-        
+    NSArray<NSString *> *quotaLimits = [headerNoWhitespaces componentsSeparatedByString:@","];
+    
+    // Each quotaLimit exists of retryAfter:categories:scope. The scope is ignored here
+    // as it can be ignored by SDKs.
+    for (NSString* quota in quotaLimits) {
         NSArray<NSString *> *parameters = [quota componentsSeparatedByString:@":"];
         
         NSNumber *retryAfterInSeconds = [self getRetryAfterInSeconds:parameters[0]];
@@ -30,6 +33,9 @@ NS_ASSUME_NONNULL_BEGIN
             continue;
         }
         
+        // The categories are a semicolon separated list. If this parameter is empty it stands
+        // for all categories. componentsSeparatedByString returns one category even if this
+        // parameter is empty.
         NSArray<NSString *> *categories =  [parameters[1] componentsSeparatedByString:@";"];
         for (NSString *category in categories) {
             rateLimits[category] = [SentryCurrentDate.date dateByAddingTimeInterval:[retryAfterInSeconds doubleValue]];
@@ -39,12 +45,12 @@ NS_ASSUME_NONNULL_BEGIN
     return rateLimits;
 }
 
-+ (NSString *)removeAllWhitespaces:(NSString *)string {
+- (NSString *)removeAllWhitespaces:(NSString *)string {
     NSArray *words = [string componentsSeparatedByCharactersInSet :[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     return [words componentsJoinedByString:@""];
 }
 
-+ (NSNumber *)getRetryAfterInSeconds:(NSString *)string {
+- (NSNumber *)getRetryAfterInSeconds:(NSString *)string {
     NSNumberFormatter *numberFormatter = [[NSNumberFormatter alloc] init];
     numberFormatter.numberStyle = NSNumberFormatterNoStyle;
     return [numberFormatter numberFromString:string];

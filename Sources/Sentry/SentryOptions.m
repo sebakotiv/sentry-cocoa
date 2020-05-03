@@ -21,7 +21,19 @@
     if (self) {
         [self validateOptions:options didFailWithError:error];
         if (nil != error && nil != *error) {
+            [SentryLog logWithMessage:[NSString stringWithFormat:@"Failed to initialize: %@", *error] andLevel:kSentryLogLevelError];
             return nil;
+        }
+
+        // If no user-defined release, use default.
+        if (nil == self.releaseName) {
+            NSDictionary *infoDict = [[NSBundle mainBundle] infoDictionary];
+            if (nil != infoDict) {
+                self.releaseName = [NSString stringWithFormat:@"%@@%@+%@",
+                                    infoDict[@"CFBundleIdentifier"],
+                                    infoDict[@"CFBundleShortVersionString"],
+                                    infoDict[@"CFBundleVersion"]];
+            }
         }
     }
     return self;
@@ -87,7 +99,7 @@
         self.maxBreadcrumbs = [[options objectForKey:@"maxBreadcrumbs"] unsignedIntValue];
     } else {
         // fallback value
-        self.maxBreadcrumbs = [@100 unsignedIntValue];
+        self.maxBreadcrumbs = defaultMaxBreadcrumbs;
     }
 
     if (nil != [options objectForKey:@"beforeSend"]) {

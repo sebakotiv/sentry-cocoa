@@ -12,10 +12,9 @@ SENTRY_NO_INIT
 - (instancetype)initWithClient:(SentryClient *_Nullable)client andScope:(SentryScope *_Nullable)scope;
 
 // Since there's no scope stack, single hub instance, experimenting with holding session here.
-@property(nonatomic, readonly, strong) SentrySession *session;
+@property(nonatomic, readonly, strong) SentrySession *_Nullable session;
 
 - (void)startSession;
-- (void)endSession;
 - (void)endSessionWithTimestamp:(NSDate*)timestamp;
 - (void)closeCachedSession;
 
@@ -77,6 +76,11 @@ SENTRY_NO_INIT
  * @return BOOL If instance of `integrationClass` exists within `SentryHub.installedIntegrations`.
  */
 - (BOOL)isIntegrationInstalled:(Class)integrationClass;
+
+/**
+ * Set global user -> thus will be sent with every event
+ */
+- (void)setUser:(SentryUser * _Nullable)user;
 
 @end
 

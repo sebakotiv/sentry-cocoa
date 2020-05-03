@@ -35,11 +35,6 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, strong) NSMutableArray<SentryBreadcrumb *> *breadcrumbArray;
 
 /**
- * The release version name of the application.
- */
-@property(atomic, copy) NSString *_Nullable releaseString;
-
-/**
  * This distribution of the application.
  */
 @property(atomic, copy) NSString *_Nullable distString;
@@ -59,24 +54,25 @@ NS_ASSUME_NONNULL_BEGIN
  */
 @property(atomic) enum SentryLevel levelEnum;
 
+@property(atomic) NSInteger maxBreadcrumbs;
+
 @end
 
 @implementation SentryScope
 
 #pragma mark Initializer
 
-- (instancetype)init {
+- (instancetype)initWithMaxBreadcrumbs:(NSInteger)maxBreadcrumbs {
     if (self = [super init]) {
         self.listeners = [NSMutableArray new];
+        self.maxBreadcrumbs = maxBreadcrumbs;
         [self clear];
-        // Default values
-        NSDictionary *infoDict = [[NSBundle mainBundle] infoDictionary];
-        if (nil != infoDict) {
-            [self setRelease:[NSString stringWithFormat:@"%@@%@+%@", infoDict[@"CFBundleIdentifier"], infoDict[@"CFBundleShortVersionString"],
-                infoDict[@"CFBundleVersion"]]];
-        }
     }
     return self;
+}
+
+- (instancetype)init {
+    return [self initWithMaxBreadcrumbs:defaultMaxBreadcrumbs];
 }
 
 - (instancetype)initWithScope:(SentryScope *)scope {
@@ -92,10 +88,10 @@ NS_ASSUME_NONNULL_BEGIN
             user.username = scopeUser.username;
             user.email = scopeUser.email;
         }
+        self.maxBreadcrumbs = scope.maxBreadcrumbs;
         self.userObject = user;
         self.contextDictionary = scope.contextDictionary.mutableCopy;
         self.breadcrumbArray = scope.breadcrumbArray.mutableCopy;
-        self.releaseString = scope.releaseString;
         self.distString = scope.distString;
         self.environmentString = scope.environmentString;
         self.levelEnum = scope.levelEnum;
@@ -110,6 +106,9 @@ NS_ASSUME_NONNULL_BEGIN
     [SentryLog logWithMessage:[NSString stringWithFormat:@"Add breadcrumb: %@", crumb] andLevel:kSentryLogLevelDebug];
     @synchronized (self) {
         [self.breadcrumbArray addObject:crumb];
+        if ([self.breadcrumbArray count] > self.maxBreadcrumbs) {
+            [self.breadcrumbArray removeObjectAtIndex:0];
+        }
     }
     [self notifyListeners];
 }
@@ -121,7 +120,6 @@ NS_ASSUME_NONNULL_BEGIN
         self.tagDictionary = [NSMutableDictionary new];
         self.extraDictionary = [NSMutableDictionary new];
         self.contextDictionary = [NSMutableDictionary new];
-        self.releaseString = nil;
         self.distString = nil;
         self.environmentString = nil;
         self.levelEnum = kSentryLevelNone;
@@ -183,11 +181,6 @@ NS_ASSUME_NONNULL_BEGIN
     [self notifyListeners];
 }
 
-- (void)setRelease:(NSString *_Nullable)releaseName {
-    self.releaseString = releaseName;
-    [self notifyListeners];
-}
-
 - (void)setDist:(NSString *_Nullable)dist {
     self.distString = dist;
     [self notifyListeners];
@@ -237,7 +230,6 @@ NS_ASSUME_NONNULL_BEGIN
         [serializedData setValue:self.extraDictionary forKey:@"extra"];
         [serializedData setValue:self.contextDictionary forKey:@"context"];
         [serializedData setValue:[self.userObject serialize] forKey:@"user"];
-        [serializedData setValue:self.releaseString forKey:@"release"];
         [serializedData setValue:self.distString forKey:@"dist"];
         [serializedData setValue:self.environmentString forKey:@"environment"];
         [serializedData setValue:self.fingerprintArray forKey:@"fingerprint"];
@@ -252,12 +244,6 @@ NS_ASSUME_NONNULL_BEGIN
     @synchronized (self) {
         if (nil != self.userObject) {
             session.user = self.userObject.copy;
-        }
-
-        NSString *releaseName = [self releaseString];
-        if (nil != releaseName) {
-            // TODO: Make sure release set on options is applied to the scope so it's available now
-            session.releaseName = releaseName;
         }
 
         NSString *environment = self.environmentString;
@@ -294,12 +280,6 @@ NS_ASSUME_NONNULL_BEGIN
 
         if (nil != self.userObject) {
             event.user = self.userObject.copy;
-        }
-        
-        NSString *releaseName = [self releaseString];
-        if (nil != releaseName && nil == event.releaseName) {
-            // release can also be set via options but scope takes precedence.
-            event.releaseName = releaseName;
         }
         
         NSString *dist = self.distString;

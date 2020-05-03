@@ -1,6 +1,33 @@
 # Changelog
 
-## unreleased
+## 5.0.0-rc.1
+
+- feat: Add support for mac catalyst #479
+- fix: RateLimitCategories #482
+- fix: RetryAfter treated like all categories #481
+- feat: RateLimiting for cached events and envelopes #480
+- fix: EnvelopeRateLimit init envelope with header #478
+
+## 5.0.0-beta.7
+
+- feat: RateLimit for non cached Envelopes #476
+- fix: Use RateLimitCategoryError for events #470
+- feat: Store SentryEnvelopes in extra path #468
+- feat: Adds setUser to SentrySDK and SentryHub #467
+- feat: Add auto session starting for macOS #463
+- fix: Take release name from options #462
+- feat: Use new envelope endpoint #475
+- feat: App lifecycle events as breadcrumbs #474
+
+## 5.0.0-beta.6
+
+- feat: RateLimit for sendAllStoredEvents #458
+- fix: Use maxBreadcrumbs from options #451
+- fix: Send vmaddr if available for apple crash reports #459
+
+## 5.0.0-beta.5
+
+- fix: Limit number of breadcrumbs #450
 
 ## 5.0.0-beta.4
 
@@ -22,7 +49,7 @@
 
 - feat: Added Session Feature
 - feat: New option `enableAutoSessionTracking` set to `true` if you want sessions to be enabled
-- feat: Add `_crashOnException:` to handle exceptions for AppKit apps on macOS 
+- feat: Add `_crashOnException:` to handle exceptions for AppKit apps on macOS
 
 ## 5.0.0-beta.0
 
@@ -30,7 +57,7 @@
 
 ## 5.0.0-alpha.0
 
-***BREAKING***: This is the first public release of our new `5.0.0` #339 version of the SDK.
+**_BREAKING_**: This is the first public release of our new `5.0.0` #339 version of the SDK.
 The majority of the public API of the SDK changed, now it's more streamlined with other Sentry SDKs and prepared for future updates.
 Please read the migration guide how to use the new SDK [MIGRATION.MD](MIGRATION.md)
 

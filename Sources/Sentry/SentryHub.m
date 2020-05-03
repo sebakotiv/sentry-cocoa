@@ -22,8 +22,8 @@
 
 - (instancetype)initWithClient:(SentryClient *_Nullable)client andScope:(SentryScope *_Nullable)scope {
     if (self = [super init]) {
-        self.scope = scope;
         [self bindClient:client];
+        self.scope = scope;
         _sessionLock = [[NSObject alloc] init];
     }
     return self;
@@ -32,12 +32,20 @@
 - (void)startSession {
     SentrySession *lastSession = nil;
     SentryScope *scope = [self getScope];
+    SentryClient *client = [self getClient];
+    SentryOptions *options = [client options];
+    if (nil == options || nil == options.releaseName) {
+        [SentryLog logWithMessage:[NSString stringWithFormat:@"No option or release to start a session."] andLevel:kSentryLogLevelError];
+        return;
+    }
     @synchronized (_sessionLock) {
         if (nil != _session) {
             lastSession = _session;
         }
         _session = [[SentrySession alloc] init];
+        _session.releaseName = options.releaseName;
         [scope applyToSession:_session];
+
         [self storeCurrentSession:_session];
         // TODO: Capture outside the lock. Not the reference in the scope.
         [self captureSession:_session];
@@ -166,10 +174,17 @@
 }
 
 - (SentryScope *)getScope {
-    if (self.scope == nil) {
-        self.scope = [[SentryScope alloc] init];
+    @synchronized (self) {
+        if (self.scope == nil) {
+            SentryClient *client = [self getClient];
+            if (nil != client) {
+                self.scope = [[SentryScope alloc] initWithMaxBreadcrumbs:client.options.maxBreadcrumbs];
+            } else {
+                self.scope = [[SentryScope alloc] init];
+            }
+        }
+        return self.scope;
     }
-    return self.scope;
 }
 
 - (void)bindClient:(SentryClient * _Nullable)client {
@@ -203,6 +218,16 @@
         return nil;
     }
     return [integrations objectAtIndex:[integrations indexOfObject:integrationName]];
+}
+
+/**
+ * Set global user -> thus will be sent with every event
+ */
+- (void)setUser:(SentryUser * _Nullable)user {
+    SentryScope *scope = [self getScope];
+    if (nil != scope) {
+        [scope setUser:user];
+    }
 }
 
 @end

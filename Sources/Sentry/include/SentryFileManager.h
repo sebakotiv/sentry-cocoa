@@ -5,7 +5,7 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-@class SentryEvent, SentryDsn, SentryEnvelope;
+@class SentryEvent, SentryDsn, SentryEnvelope, SentryFileContents;
 
 NS_SWIFT_NAME(SentryFileManager)
 @interface SentryFileManager : NSObject
@@ -22,11 +22,19 @@ SENTRY_NO_INIT
 
 + (BOOL)createDirectoryAtPath:(NSString *)path withError:(NSError **)error;
 
-- (void)deleteAllStoredEvents;
+- (void)deleteAllStoredEventsAndEnvelopes;
 
 - (void)deleteAllFolders;
 
-- (NSArray<NSDictionary<NSString *, id> *> *)getAllStoredEvents;
+/**
+ In a previous version of SentryFileManager envelopes were stored in the same path as events.
+ Now events and envelopes are stored in two different paths. We decided that there is no need
+ for a migration strategy, because in worst case only a few envelopes get lost and this is not
+ worth the effort. Since there is no migration strategy this method could also return envelopes.
+ */
+- (NSArray<SentryFileContents *> *)getAllEventsAndMaybeEnvelopes;
+- (NSArray<SentryFileContents *> *)getAllEnvelopes;
+- (NSArray<SentryFileContents *> *)getAllStoredEventsAndEnvelopes;
 
 - (BOOL)removeFileAtPath:(NSString *)path;
 
@@ -35,6 +43,7 @@ SENTRY_NO_INIT
 - (NSString *)storeDictionary:(NSDictionary *)dictionary toPath:(NSString *)path;
 
 @property(nonatomic, assign) NSUInteger maxEvents;
+@property(nonatomic, assign) NSUInteger maxEnvelopes;
 
 @end
 

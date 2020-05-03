@@ -40,7 +40,6 @@ NS_ASSUME_NONNULL_BEGIN
 - (_Nullable instancetype)initWithOptions:(SentryOptions *)options {
     if (self = [super init]) {
         self.options = options;
-        [self.transport sendAllStoredEvents];
     }
     return self;
 }
@@ -176,7 +175,7 @@ NS_ASSUME_NONNULL_BEGIN
     return [self callEventProcessors:event];
 }
 
-- (SentryEvent *)callEventProcessors:(SentryEvent *)event {
+- (SentryEvent *_Nullable)callEventProcessors:(SentryEvent *)event {
     SentryEvent *newEvent = event;
 
     for (SentryEventProcessor processor in SentryGlobalEventProcessor.shared.processors) {

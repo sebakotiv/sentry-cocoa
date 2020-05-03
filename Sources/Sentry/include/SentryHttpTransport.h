@@ -8,6 +8,8 @@
 #import "SentryRequestManager.h"
 #import "SentryRateLimits.h"
 
+@class SentryEnvelopeRateLimit;
+
 NS_ASSUME_NONNULL_BEGIN
 
 @interface SentryHttpTransport : NSObject <SentryTransport>
@@ -15,14 +17,15 @@ SENTRY_NO_INIT
 
 - (id)initWithOptions:(SentryOptions *)options
     sentryFileManager:(SentryFileManager *)sentryFileManager
- sentryRequestManager:(id<SentryRequestManager>) sentryRequestManager
-     sentryRateLimits:(id<SentryRateLimits>) sentryRateLimits;
+ sentryRequestManager:(id<SentryRequestManager>)sentryRequestManager
+     sentryRateLimits:(id<SentryRateLimits>)sentryRateLimits
+sentryEnvelopeRateLimit:(SentryEnvelopeRateLimit *)envelopeRateLimit;
 
 /**
  * This is triggered after the first upload attempt of an event. Checks if event
- * should stay on disk to be uploaded when `sendAllStoredEvents` is triggerd.
+ * should stay on disk to be uploaded when `sendCachedEventsAndEnvelopes` is triggerd.
  *
- * Within `sendAllStoredEvents` this function isn't triggerd.
+ * Within `sendCachedEventsAndEnvelopes` this function isn't triggerd.
  *
  * @return BOOL YES = store and try again later, NO = delete
  */

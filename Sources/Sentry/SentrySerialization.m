@@ -2,6 +2,7 @@
 #import "SentryDefines.h"
 #import "SentryLog.h"
 #import "SentryError.h"
+#import "SentryEnvelopeItemType.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -135,7 +136,7 @@ NS_ASSUME_NONNULL_BEGIN
             SentryEnvelopeItemHeader *itemHeader = [[SentryEnvelopeItemHeader alloc] initWithType:type length:bodyLength];
             NSData *itemBody = [data subdataWithRange:NSMakeRange(i + 1, bodyLength)];
 #ifdef DEBUG
-            if ([@"event" isEqual:type] || [@"session" isEqual:type]) {
+            if ([SentryEnvelopeItemTypeEvent isEqual:type] || [SentryEnvelopeItemTypeSession isEqual:type]) {
                 NSString *event = [[NSString alloc] initWithData:itemBody encoding:NSUTF8StringEncoding];
                 [SentryLog logWithMessage:[NSString stringWithFormat:@"Event %@", event] andLevel:kSentryLogLevelDebug];
             }

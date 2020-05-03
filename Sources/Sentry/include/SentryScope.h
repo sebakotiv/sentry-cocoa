@@ -11,7 +11,8 @@ NS_ASSUME_NONNULL_BEGIN
 NS_SWIFT_NAME(Scope)
 @interface SentryScope : NSObject <SentrySerializable>
 
-- (instancetype)init NS_DESIGNATED_INITIALIZER;
+- (instancetype)initWithMaxBreadcrumbs:(NSInteger)maxBreadcrumbs NS_DESIGNATED_INITIALIZER;
+- (instancetype)init;
 - (instancetype)initWithScope:(SentryScope *)scope;
 
 /**
@@ -38,11 +39,6 @@ NS_SWIFT_NAME(Scope)
  * Set global extra -> these will be sent with every event
  */
 - (void)setExtraValue:(id)value forKey:(NSString *)key NS_SWIFT_NAME(setExtra(value:key:));
-
-/**
- * Set release in the scope
- */
-- (void)setRelease:(NSString *_Nullable)releaseName;
 
 /**
  * Set dist in the scope

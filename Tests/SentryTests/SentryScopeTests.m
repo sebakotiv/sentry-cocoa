@@ -36,6 +36,35 @@
     XCTAssertEqualObjects([[scope serialize] objectForKey:@"extra"], @{@"c": @"d"});
 }
 
+- (void)testBreadcrumbOlderReplacedByNewer {
+    NSUInteger expectedMaxBreadcrumb = 1;
+    SentryScope *scope = [[SentryScope alloc] initWithMaxBreadcrumbs:expectedMaxBreadcrumb];
+    SentryBreadcrumb *crumb1 = [[SentryBreadcrumb alloc] init];
+    [crumb1 setMessage:@"crumb 1"];
+    [scope addBreadcrumb:crumb1];
+    NSDictionary<NSString *, id> *scope1 = [scope serialize];
+    NSArray *scope1Crumbs = [scope1 objectForKey:@"breadcrumbs"];
+    XCTAssertEqual(expectedMaxBreadcrumb, [scope1Crumbs count]);
+
+    SentryBreadcrumb *crumb2 = [[SentryBreadcrumb alloc] init];
+    [crumb2 setMessage:@"crumb 2"];
+    [scope addBreadcrumb:crumb2];
+    NSDictionary<NSString *, id> *scope2 = [scope serialize];
+    NSArray *scope2Crumbs = [scope2 objectForKey:@"breadcrumbs"];
+    XCTAssertEqual(expectedMaxBreadcrumb, [scope2Crumbs count]);
+}
+
+- (void)testDefaultMaxCapacity {
+    SentryScope *scope = [[SentryScope alloc] init];
+    for (int i = 0; i < 2000; ++i) {
+        [scope addBreadcrumb:[[SentryBreadcrumb alloc] init]];
+    }
+
+    NSDictionary<NSString *, id> *scopeSerialized = [scope serialize];
+    NSArray *scopeCrumbs = [scopeSerialized objectForKey:@"breadcrumbs"];
+    XCTAssertEqual(100, [scopeCrumbs count]);
+}
+
 - (void)testSetExtraValueForKey {
     #warning TODO implement
 }
@@ -49,7 +78,17 @@
 }
 
 - (void)testSetUser {
-    #warning TODO implement
+    SentryScope *scope = [[SentryScope alloc] init];
+    SentryUser *user = [[SentryUser alloc] init];
+    
+    [user setUserId:@"123"];
+    [scope setUser:user];
+    
+    NSDictionary<NSString *, id> *scopeSerialized = [scope serialize];
+    NSDictionary<NSString *, id> *scopeUser = [scopeSerialized objectForKey:@"user"];
+    NSString *scopeUserId = [scopeUser objectForKey:@"id"];
+    
+    XCTAssertEqualObjects(scopeUserId, @"123");
 }
 
 - (void)testSerialize {
@@ -74,13 +113,6 @@
 
 - (void)testClear {
     #warning TODO implement
-}
-
-- (void)testReleaseSerializes {
-    SentryScope *scope = [[SentryScope alloc] init];
-    NSString *expectedReleaseName = @"io.sentry.cocoa@5.0.0-deadbeef";
-    [scope setRelease:expectedReleaseName];
-    XCTAssertEqualObjects([[scope serialize] objectForKey:@"release"], expectedReleaseName);
 }
 
 - (void)testDistSerializes {
@@ -123,7 +155,6 @@
     [scope addBreadcrumb:[self getBreadcrumb]];
     [scope setUser:[[SentryUser alloc] initWithUserId:@"id"]];
     [scope setContextValue:@{@"e": @"f"} forKey:@"myContext"];
-    [scope setRelease:@"123"];
     [scope setDist:@"456"];
     [scope setEnvironment:@"789"];
     [scope setFingerprint:@[@"a"]];
@@ -138,7 +169,6 @@
     [cloned addBreadcrumb:[[SentryBreadcrumb alloc] initWithLevel:kSentryLevelDebug category:@"http2"]];
     [cloned setUser:[[SentryUser alloc] initWithUserId:@"aid"]];
     [cloned setContextValue:@{@"ae": @"af"} forKey:@"myContext"];
-    [cloned setRelease:@"a123"];
     [cloned setDist:@"a456"];
     [cloned setEnvironment:@"a789"];
     
