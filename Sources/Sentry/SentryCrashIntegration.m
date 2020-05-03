@@ -124,9 +124,9 @@ static SentryCrashInstallationReporter *installation = nil;
 
             [outerScope setContextValue:appData forKey:@"app"];
             
-            [outerScope addScopeListener:^(SentryScope * _Nonnull scope) {
-                [SentryCrash.sharedInstance setUserInfo:[scope serialize]];
-            }];
+//            [outerScope addScopeListener:^(SentryScope * _Nonnull scope) {
+//                [SentryCrash.sharedInstance setUserInfo:[scope serialize]];
+//            }];
         }];
     }
 }
