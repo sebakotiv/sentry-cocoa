@@ -1,13 +1,5 @@
-//
-//  ViewController.swift
-//  Example
-//
-//  Created by Daniel Griesser on 27.02.20.
-//  Copyright © 2020 Sentry. All rights reserved.
-//
-
-import UIKit
 import Sentry
+import UIKit
 
 class ViewController: UIViewController {
 
@@ -18,15 +10,20 @@ class ViewController: UIViewController {
             scope.setEnvironment("debug")
             scope.setTag(value: "swift", key: "language")
             scope.setExtra(value: String(describing: self), key: "currentViewController")
-            let u = Sentry.User(userId: "1")
-            u.email = "tony@example.com"
-            scope.setUser(u)
+            let user = Sentry.User(userId: "1")
+            user.email = "tony@example.com"
+            scope.setUser(user)
         }
+        // Also works
+        let user = Sentry.User(userId: "1")
+        user.email = "tony@example.com"
+        SentrySDK.setUser(user)
     }
     
     @IBAction func addBreadcrumb(_ sender: Any) {
-        let crumb = Breadcrumb()
+        let crumb = Breadcrumb(level: SentryLevel.info, category: "Debug")
         crumb.message = "tapped addBreadcrumb"
+        crumb.type = "user"
         SentrySDK.addBreadcrumb(crumb: crumb)
     }
     
@@ -37,8 +34,23 @@ class ViewController: UIViewController {
         print("\(String(describing: eventId))")
     }
     
+    @IBAction func captureUserFeedback(_ sender: Any) {
+        let error = NSError(domain: "UserFeedbackErrorDomain", code: 0, userInfo: [NSLocalizedDescriptionKey: "This never happens."])
+
+        let eventId = SentrySDK.capture(error: error) { scope in
+            scope.setLevel(.fatal)
+        }
+        
+        let userFeedback = UserFeedback(eventId: eventId)
+        userFeedback.comments = "It broke on iOS-Swift. I don't know why, but this happens."
+        userFeedback.email = "john@me.com"
+        userFeedback.name = "John Me"
+        SentrySDK.capture(userFeedback: userFeedback)
+    }
+    
     @IBAction func captureError(_ sender: Any) {
-        let error = NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey : "Object does not exist"])
+        let error = NSError(domain: "SampleErrorDomain", code: 1, userInfo: [NSLocalizedDescriptionKey: "Object does not exist"])
+
         SentrySDK.capture(error: error) { (scope) in
             // Changes in here will only be captured for this event
             // The scope in this callback is a clone of the current scope
@@ -62,4 +74,3 @@ class ViewController: UIViewController {
         SentrySDK.crash()
     }
 }
-

@@ -1,10 +1,12 @@
-#import "SentryEvent.h"
+#import "SentryDefines.h"
+
+@class SentryEvent;
 
 typedef SentryEvent *__nullable (^SentryEventProcessor)(SentryEvent *_Nonnull event);
 
 NS_ASSUME_NONNULL_BEGIN
 
-@interface SentryGlobalEventProcessor : NSObject 
+@interface SentryGlobalEventProcessor : NSObject
 SENTRY_NO_INIT
 
 @property (nonatomic, strong) NSMutableArray<SentryEventProcessor> *processors;

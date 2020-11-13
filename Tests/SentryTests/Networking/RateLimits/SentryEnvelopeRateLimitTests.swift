@@ -2,7 +2,7 @@ import XCTest
 
 class SentryEnvelopeRateLimitTests: XCTestCase {
     
-    private var rateLimits : TestRateLimits!
+    private var rateLimits: TestRateLimits!
     private var sut: EnvelopeRateLimit!
     
     override func setUp() {
@@ -19,7 +19,7 @@ class SentryEnvelopeRateLimitTests: XCTestCase {
     }
     
     func testLimitForErrorActive() {
-        rateLimits.typeLimits = ["error"]
+        rateLimits.rateLimits = [SentryRateLimitCategory.error]
         
         let envelope = getEnvelope()
         let actual = sut.removeRateLimitedItems(envelope)
@@ -32,7 +32,7 @@ class SentryEnvelopeRateLimitTests: XCTestCase {
     }
     
     func testLimitForSessionActive() {
-        rateLimits.typeLimits = ["session"]
+        rateLimits.rateLimits = [SentryRateLimitCategory.session]
         
         let envelope = getEnvelope()
         let actual = sut.removeRateLimitedItems(envelope)
@@ -45,7 +45,7 @@ class SentryEnvelopeRateLimitTests: XCTestCase {
     }
     
     func testLimitForCustomType() {
-        rateLimits.typeLimits = ["default"]
+        rateLimits.rateLimits = [SentryRateLimitCategory.default]
         var envelopeItems = [SentryEnvelopeItem]()
         envelopeItems.append(SentryEnvelopeItem(event: Event()))
         
@@ -53,7 +53,7 @@ class SentryEnvelopeRateLimitTests: XCTestCase {
         envelopeItems.append(SentryEnvelopeItem(header: envelopeHeader, data: Data()))
         envelopeItems.append(SentryEnvelopeItem(header: envelopeHeader, data: Data()))
         
-        let envelope =  SentryEnvelope(id: "1", items: envelopeItems)
+        let envelope = SentryEnvelope(id: SentryId(), items: envelopeItems)
         
         let actual = sut.removeRateLimitedItems(envelope)
         
@@ -69,11 +69,11 @@ class SentryEnvelopeRateLimitTests: XCTestCase {
         }
         
         for _ in Array(0...2) {
-            let session = SentrySession()
+            let session = SentrySession(releaseName: "")
             envelopeItems.append(SentryEnvelopeItem(session: session))
         }
         
-        return SentryEnvelope(id: "1", items: envelopeItems)
+        return SentryEnvelope(id: SentryId(), items: envelopeItems)
     }
     
 }

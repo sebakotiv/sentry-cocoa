@@ -1,5 +1,5 @@
-import XCTest
 @testable import Sentry
+import XCTest
 
 class SentryDefaultRateLimitsTests: XCTestCase {
     
@@ -9,6 +9,7 @@ class SentryDefaultRateLimitsTests: XCTestCase {
     private var sut: RateLimits!
     
     override func setUp() {
+        super.setUp()
         currentDateProvider = TestCurrentDateProvider()
         CurrentDate.setCurrentDateProvider(currentDateProvider)
     
@@ -16,13 +17,13 @@ class SentryDefaultRateLimitsTests: XCTestCase {
     }
     
     func testNoUpdateCalled() {
-        XCTAssertFalse(sut.isRateLimitActive(""))
+        XCTAssertFalse(sut.isRateLimitActive(SentryRateLimitCategory.default))
     }
     
     func testRateLimitReached() {
-        let category = "event"
+        let category = SentryRateLimitCategory.error
         XCTAssertFalse(sut.isRateLimitActive(category))
-        let response = TestResponseFactory.createRateLimitResponse(headerValue: "1:\(category):key")
+        let response = TestResponseFactory.createRateLimitResponse(headerValue: "1:error:key")
         sut.update(response)
         XCTAssertTrue(sut.isRateLimitActive(category))
         
@@ -37,50 +38,53 @@ class SentryDefaultRateLimitsTests: XCTestCase {
     }
     
     func testRateLimitAndRetryHeader() {
-        let category = "transaction"
-        let response = HTTPURLResponse.init(
-            url: URL.init(fileURLWithPath: ""),
+        let category = SentryRateLimitCategory.transaction
+        if let response = HTTPURLResponse(
+            url: URL(fileURLWithPath: ""),
             statusCode: 429,
             httpVersion: "1.1",
             headerFields: [
                 "Retry-After": "2",
-                "X-Sentry-Rate-Limits": "1:\(category):key"
-        ])!
-        sut.update(response)
+                "X-Sentry-Rate-Limits": "1:transaction:key"
+        ]) {
+            sut.update(response)
+        }
+
         XCTAssertTrue(sut.isRateLimitActive(category))
         // If X-Sentry-Rate-Limits is set Retry-After is ignored
-        XCTAssertFalse(sut.isRateLimitActive("anyCategory"))
+        XCTAssertFalse(sut.isRateLimitActive(SentryRateLimitCategory.default))
         
         // Rate Limit expired
         let date = currentDateProvider.date()
         currentDateProvider.setDate(date: date.addingTimeInterval(1))
         XCTAssertFalse(sut.isRateLimitActive(category))
-        XCTAssertFalse(sut.isRateLimitActive("anyCategory"))
+        XCTAssertFalse(sut.isRateLimitActive(SentryRateLimitCategory.default))
     }
     
     func testRetryHeaderIn503() {
-        let response = HTTPURLResponse.init(
-            url: URL.init(fileURLWithPath: ""),
+        if let response = HTTPURLResponse(
+            url: URL(fileURLWithPath: ""),
             statusCode: 503,
             httpVersion: "1.1",
             headerFields: [
                 "Retry-After": "2"
-        ])!
-        sut.update(response)
+        ]) {
+            sut.update(response)
+        }
 
-        XCTAssertFalse(sut.isRateLimitActive("anyCategory"))
+        XCTAssertFalse(sut.isRateLimitActive(SentryRateLimitCategory.default))
     }
     
     func testRetryHeaderIsLikeAllCategories() {
         sut.update(TestResponseFactory.createRateLimitResponse(headerValue: "2::key"))
-        sut.update(TestResponseFactory.createRetryAfterResponse(headerValue: "1"))
+        sut.update(TestResponseFactory.createRetryAfterResponse(headerValue: "3"))
         
-        XCTAssertTrue(sut.isRateLimitActive("any"))
+        XCTAssertTrue(sut.isRateLimitActive(SentryRateLimitCategory.default))
         
         // RateLimit expired
         let date = currentDateProvider.date()
-        currentDateProvider.setDate(date: date.addingTimeInterval(1))
-        XCTAssertFalse(sut.isRateLimitActive("any"))
+        currentDateProvider.setDate(date: date.addingTimeInterval(3))
+        XCTAssertFalse(sut.isRateLimitActive(SentryRateLimitCategory.default))
     }
 
     func testRetryAfterHeaderDeltaSeconds() {
@@ -95,70 +99,73 @@ class SentryDefaultRateLimitsTests: XCTestCase {
     private func testRetryHeaderWith1Second(value: String) {
         let response = TestResponseFactory.createRetryAfterResponse(headerValue: value)
         sut.update(response)
-        XCTAssertTrue(sut.isRateLimitActive(""))
+        XCTAssertTrue(sut.isRateLimitActive(SentryRateLimitCategory.default))
         
         // Retry-After almost expired
         let date = currentDateProvider.date()
         currentDateProvider.setDate(date: date.addingTimeInterval(0.999))
-        XCTAssertTrue(sut.isRateLimitActive(""))
+        XCTAssertTrue(sut.isRateLimitActive(SentryRateLimitCategory.attachment))
         
         // Retry-After expired
         currentDateProvider.setDate(date: date.addingTimeInterval(1))
-        XCTAssertFalse(sut.isRateLimitActive(""))
+        XCTAssertFalse(sut.isRateLimitActive(SentryRateLimitCategory.default))
     }
     
     func testRetryAfterHeaderIsEmpty() {
         let response = TestResponseFactory.createRetryAfterResponse(headerValue: "")
      
         sut.update(response)
-        XCTAssertTrue(sut.isRateLimitActive(""))
+        XCTAssertTrue(sut.isRateLimitActive(SentryRateLimitCategory.transaction))
         
         currentDateProvider.setDate(date: currentDateProvider.date().addingTimeInterval(defaultRetryAfterInSeconds))
-        XCTAssertFalse(sut.isRateLimitActive(""))
+        XCTAssertFalse(sut.isRateLimitActive(SentryRateLimitCategory.transaction))
+    }
+    
+    func testLongerRetryHeaderIsKept() {
+        let response11 = TestResponseFactory.createRetryAfterResponse(headerValue: "11")
+        let response10 = TestResponseFactory.createRetryAfterResponse(headerValue: "10")
+        
+        sut.update(response11)
+        sut.update(response10)
+        
+        currentDateProvider.setDate(date: currentDateProvider.date().addingTimeInterval(10.99))
+        XCTAssertTrue(sut.isRateLimitActive(SentryRateLimitCategory.default))
+        
+        let response1 = TestResponseFactory.createRetryAfterResponse(headerValue: "1")
+        sut.update(response1)
+        
+        currentDateProvider.setDate(date: currentDateProvider.date().addingTimeInterval(0.999))
+        XCTAssertTrue(sut.isRateLimitActive(SentryRateLimitCategory.default))
+    }
+    
+    func testLongerRateLimitIsKept() {
+        let response11 = TestResponseFactory.createRateLimitResponse(headerValue: "11:default;error:key")
+        let response10 = TestResponseFactory.createRateLimitResponse(headerValue: "10:default;error:key")
+        
+        sut.update(response11)
+        sut.update(response10)
+        
+        currentDateProvider.setDate(date: currentDateProvider.date().addingTimeInterval(10.99))
+        XCTAssertTrue(sut.isRateLimitActive(SentryRateLimitCategory.default))
+        XCTAssertTrue(sut.isRateLimitActive(SentryRateLimitCategory.error))
+        
+        let response1 = TestResponseFactory.createRateLimitResponse(headerValue: "1:default;error:key")
+        sut.update(response1)
+        
+        currentDateProvider.setDate(date: currentDateProvider.date().addingTimeInterval(0.999))
+        XCTAssertTrue(sut.isRateLimitActive(SentryRateLimitCategory.default))
+        XCTAssertTrue(sut.isRateLimitActive(SentryRateLimitCategory.error))
     }
     
     func testAllCategories() {
         let response = TestResponseFactory.createRateLimitResponse(headerValue: "1::key")
         
         sut.update(response)
-        XCTAssertTrue(sut.isRateLimitActive(""))
-        XCTAssertTrue(sut.isRateLimitActive("SomeCategory"))
+        XCTAssertTrue(sut.isRateLimitActive(SentryRateLimitCategory.transaction))
+        XCTAssertTrue(sut.isRateLimitActive(SentryRateLimitCategory.default))
         
         currentDateProvider.setDate(date: currentDateProvider.date().addingTimeInterval(1))
-        XCTAssertFalse(sut.isRateLimitActive(""))
-        XCTAssertFalse(sut.isRateLimitActive("SomeCategory"))
-    }
-    
-    func testMultipleConcurrentUpdates() {
-        let queue1 = DispatchQueue(label: "SentryDefaultRateLimitsTests1", qos: .utility, attributes: [.concurrent, .initiallyInactive])
-        let queue2 = DispatchQueue(label: "SentryDefaultRateLimitsTests2", qos: .utility, attributes: [.concurrent, .initiallyInactive])
-        
-        let group = DispatchGroup()
-        for i in Array(0...1000) {
-            startWorkItemTest(i: i, queue: queue1, group: group)
-        }
-        for i in Array(1001...2000) {
-            startWorkItemTest(i: i, queue: queue2, group: group)
-        }
-        
-        queue1.activate()
-        queue2.activate()
-        group.wait()
-        
-        // Make sure that all 2000 are saved and none are overwritten by
-        // race conditions.
-        for i in Array(0...2000) {
-            XCTAssertTrue(self.sut.isRateLimitActive(String(i)))
-        }
-    }
-    
-    func startWorkItemTest(i: Int, queue: DispatchQueue, group: DispatchGroup) {
-        group.enter()
-        queue.async {
-            let response = TestResponseFactory.createRateLimitResponse(headerValue: "1:\(i):key")
-            self.sut.update(response)
-            XCTAssertTrue(self.sut.isRateLimitActive(String(i)))
-            group.leave()
-        }
+        XCTAssertFalse(sut.isRateLimitActive(SentryRateLimitCategory.transaction))
+        XCTAssertFalse(sut.isRateLimitActive(SentryRateLimitCategory.attachment))
     }
 }

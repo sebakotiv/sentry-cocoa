@@ -3,8 +3,10 @@ github:
   owner: getsentry
   repo: sentry-cocoa
 changelogPolicy: simple
-preReleaseCommand: bash .travis/bump.sh
+preReleaseCommand: bash ./scripts/bump.sh
 statusProvider:
+  name: github
+artifactProvider:
   name: github
 targets:
   - name: github
@@ -12,6 +14,5 @@ targets:
     specPath: Sentry.podspec
   - name: registry
     type: sdk
-    linkPrereleases: true
     config:
       canonical: 'cocoapods:sentry-cocoa'

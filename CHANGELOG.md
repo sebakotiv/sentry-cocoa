@@ -1,5 +1,275 @@
 # Changelog
 
+## unreleased
+
+## 6.0.9
+
+- fix: Serialization of SentryScope #841
+- fix: Recrash parsing in SentryCrash #850
+- fix: Not crash during crash reporting #849 
+
+## 6.0.8
+
+- feat: Add storeEnvelope on SentryClient #836
+- perf: Async synching of scope on to SentryCrash #832
+
+## 6.0.7
+
+- fix: Drop Sessions without release name #826
+- feat: Bring back SentryOptions.enabled #818
+- fix: Remove enum specifier for SentryLevel #822
+- feat: Send environment 'production' if nothing was set #825
+- fix: Typo for Swift name: UserFeedback #829
+
+## 6.0.6
+
+- fix: Call beforeBreadcrumb for Breadcrumb Tracker #815
+
+## 6.0.5
+
+- fix: Add eventId to user feedback envelope header #809
+- feat: Manually capturing User Feedback #804
+
+## 6.0.4
+- fix: Sanitize UserInfo of NSError and NSException #770
+- fix: Xcode 12 warnings for Cocoapods #791
+
+## 6.0.3
+
+- fix: Making SentrySdkInfo Public #788
+
+## 6.0.2
+
+- fix: iOS 13.4 Runtime Crash #786
+- fix: Using wrong SDK name #782
+- feat: Expose `captureEnvelope` on the client #784
+- fix: Remove initWithJSON from SentryEvent #781
+- fix: Carthage for Xcode 12 #780
+- fix: Add missing SentrySdkInfo.h to umbrella header #779
+- ref: Remove event.json field #768
+
+## 6.0.1
+
+- fix: Warning Duplicate build file in Copy Headers #761
+- fix: Warning when integrating SDK via Carthage #760
+- feat: Set installationId to userId if no user is set #757
+
+## 6.0.0
+
+This is a major bump with lots of internal improvements and a few breaking changes.
+For a detailed explanation  how to updgrade please checkout the [migration guide](MIGRATION.md).
+
+Breaking changes:
+
+- fix: Make SentryMessage formatted required #756
+- feat: Add SentryMessage #752
+- feat: Replace passing nullable Scope with overloads #743
+- feat: Remove SentryOptions.enabled #736
+- fix: Public Headers #735
+- feat: Attach stacktraces to all events by default #705
+- feat: Replace NSNumber with BOOL in SentryOptions #719
+- feat: Enable auto session tracking per default #689
+- feat: Remove deprecated SDK inits #673
+- feat: Bump minimum iOS version to 9.0 #669
+- fix: Umbrella header #671
+- feat: Replace NSString for eventId with SentryId #668
+- feat: Use envelopes for sending events #650
+
+Features and fixes:
+
+- fix: Make public isEqual _Nullable #751
+- feat: Use error domain and code for event message #750
+- feat: Remove SDK frames when attaching stacktrace #739
+- fix: captureException crates a event type=error #746
+- fix: Setting environment for Sessions #734
+- feat: Crash event and session in same envelope #731
+- feat: Allow nil in setExtraValue on SentryScope to remove key #703
+- fix: Header Imports for the Swift Package Manager #721
+- fix: Async storing of envelope to disk #714
+- feat: Migrate session init for stored envelopes #693
+- fix: Remove redundant sdk options enable check in SentryHttpTransport #698
+- fix: Sending envelopes multiple times #687
+- fix: Rate limiting for cached envelope items #685
+- feat: Errors and sessions in the same envelope #686
+- feat: Implement NSCopying for SentrySession #683
+- fix: Crash when SentryClient is nil in SentryHub #681
+- feat: Send cached envelopes first #676
+
+## 6.0.0-beta.2
+
+Breaking changes:
+
+- feat: Remove SentryOptions.enabled #736
+- fix: Public Headers #735
+
+Fix:
+- fix: Setting environment for Sessions #734
+
+## 6.0.0-beta.1
+
+This release also enables by default the option `attackStacktrace` which includes
+the stacktrace in all events, including `captureMessage` by default.
+
+Breaking Changes: 
+
+- feat: Attach stacktraces to all events by default #705
+
+Features and fixes: 
+
+- feat: Crash event and session in same envelope #731
+- feat: Allow nil in setExtraValue on SentryScope to remove key #703
+
+## 6.0.0-beta.0
+
+Breaking changes:
+
+- feat: Replace NSNumber with BOOL in SentryOptions #719
+
+Features and fixes: 
+
+- fix: Header Imports for the Swift Package Manager #721
+- fix: Async storing of envelope to disk #714
+- feat: Migrate session init for stored envelopes #693
+- fix: Remove redundant sdk options enable check in SentryHttpTransport #698
+
+## 6.0.0-alpha.0
+
+**Breaking Change**: This version uses the [envelope endpoint](https://develop.sentry.dev/sdk/envelopes/).
+If you are using an on-premise installation it requires Sentry version
+`>= v20.6.0` to work. If you are using sentry.io nothing will change and
+no action is needed. Furthermore, with this version
+[auto session tracking](https://github.com/getsentry/sentry-cocoa/blob/7876949ca78aebfe7883432e35727993c5c30829/Sources/Sentry/include/SentryOptions.h#L101)
+is enabled per default.
+[This feature](https://docs.sentry.io/product/releases/health/)
+is collecting and sending health data about the usage of your
+application.
+We are going to add the official migration guide in one of the next beta releases.
+
+Here is an overview of all the breaking changes:
+
+- feat: Enable auto session tracking per default #689
+- feat: Remove deprecated SDK inits #673
+- feat: Bump minimum iOS version to 9.0 #669
+- fix: Umbrella header #671
+- feat: Replace NSString for eventId with SentryId #668
+- feat: Use envelopes for sending events #650
+
+Other new features and fixes:
+
+- fix: Sending envelopes multiple times #687
+- fix: Rate limiting for cached envelope items #685
+- feat: Errors and sessions in the same envelope #686
+- feat: Implement NSCopying for SentrySession #683
+- fix: Crash when SentryClient is nil in SentryHub #681
+- feat: Send cached envelopes first #676
+
+## 5.2.2
+
+- feat: Add crashedLastRun to SentrySDK #688
+
+## 5.2.1
+
+- fix: Add IP address to user serialization #665
+- fix: Crash in SentryEnvelope.initWithEvent #643
+- fix: Build failure for Apple Silicon Macs #588
+- feat: capture userinfo from NSError and NSException #679
+
+## 5.2.0
+
+- fix: nxgetlocalarch app store #651
+
+## 5.1.10
+
+- fix: Crash when converting Recrash Report #627
+- feat: Add SdkInfo to Envelope Header #626
+- fix: Deserialize envelope with header and item #620
+- fix: Set LogLevel in startWithConfigureOptions #613
+
+## 5.1.10-beta.0
+
+- fix: Abnormal sessions #607
+
+## 5.1.9
+
+- fix: beforeSend callback in SentryClient #608
+
+## 5.1.8
+
+- fix: Cocoapods build
+
+## 5.1.7
+
+- fix: Overwriting stack trace for crashes #605
+- fix: Deployment target warning for Swift Package Manager for Xcode 12 #586
+
+## 5.1.6
+
+- feat: Simplified SDK start #580
+- fix: Custom release name for crash reports #590
+
+## 5.1.5
+
+- feat: Attach the stacktrace to custom events #583
+- fix: SentryCrashJSON encodeObject crash #576
+- feat: Added automatic breadcrumbs for system events #559
+
+## 5.1.4
+
+- fix: Increase max report length #569
+- fix: Remove weak ref file contents #571
+
+## 5.1.3
+
+- fix: UUID for SentryCrashReport is null #566
+
+## 5.1.2
+
+- feat: Attach stacktrace of current thread to events #561
+
+## 5.1.1
+
+- fix: Prefix categories methods with sentry #555
+- feat: Attach DebugMeta to Events #545
+- fix: Duplicate symbol for SentryMeta #549
+- feat: Set SUPPORTS_MACCATALYST to YES explicitly #547
+
+## 5.1.0
+
+- fix: Make properties of Session readonly #541
+- fix: Remove MemoryWarningIntegration #537
+- fix: Avoid Implicit conversion in SentrySession #540
+- fix: Change SentryScope setTagValue to NSString #524
+
+## 5.0.5
+
+- feat: Add remove methods for SentryScope #529
+- fix: Failing MacOS build #530
+- ref: Session values are unsigned #527
+
+## 5.0.4
+
+- fix: End file at the right place with #ifdef #521
+
+## 5.0.3
+
+- fix: Exit session with timestamp #518
+- feat: Add sentry_sanitize for NSArray #509
+
+## 5.0.2
+
+- fix: Keep maximum rate limit #498
+- fix: Ignore unknown rate limit categories #497
+- fix: On app exit, close session as healthy #500
+
+## 5.0.1
+
+- fix: Flakey concurrent test for RateLimits #493
+- fix: missing breadcrumbs data on hardcrash #492
+
+## 5.0.0
+
+- GA of major version 5
+
 ## 5.0.0-rc.1
 
 - feat: Add support for mac catalyst #479
