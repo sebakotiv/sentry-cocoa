@@ -2,6 +2,9 @@ import XCTest
 
 class SentryHubTests: XCTestCase {
     
+    private static let dsnAsString = TestConstants.dsnAsString(username: "SentryHubTests")
+    private static let dsn = TestConstants.dsn(username: "SentryHubTests")
+        
     private class Fixture {
         let options: Options
         let error = NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "Object does not exist"])
@@ -15,10 +18,13 @@ class SentryHubTests: XCTestCase {
         let sentryCrash = TestSentryCrashWrapper()
         let fileManager: SentryFileManager
         let crashedSession: SentrySession
+        let transactionName = "Some Transaction"
+        let transactionOperation = "Some Operation"
+        let random = TestRandom(value: 0.5)
         
         init() {
             options = Options()
-            options.dsn = TestConstants.dsnAsString
+            options.dsn = SentryHubTests.dsnAsString
             options.environment = "debug"
             
             scope.add(crumb)
@@ -26,7 +32,7 @@ class SentryHubTests: XCTestCase {
             event = Event()
             event.message = SentryMessage(formatted: message)
             
-            fileManager = try! SentryFileManager(dsn: TestConstants.dsn, andCurrentDateProvider: currentDateProvider)
+            fileManager = try! SentryFileManager(options: options, andCurrentDateProvider: currentDateProvider)
             
             CurrentDate.setCurrentDateProvider(currentDateProvider)
             
@@ -42,7 +48,7 @@ class SentryHubTests: XCTestCase {
         
         func getSut(_ options: Options, _ scope: Scope? = nil) -> SentryHub {
             client = TestClient(options: options)
-            let hub = SentryHub(client: client, andScope: scope, andSentryCrashWrapper: sentryCrash)
+            let hub = SentryHub(client: client, andScope: scope, andCrashAdapter: sentryCrash)
             hub.bindClient(client)
             return hub
         }
@@ -55,7 +61,9 @@ class SentryHubTests: XCTestCase {
         fixture = Fixture()
         fixture.fileManager.deleteCurrentSession()
         fixture.fileManager.deleteCrashedSession()
+        fixture.fileManager.deleteAppState()
         fixture.fileManager.deleteTimestampLastInForeground()
+        fixture.fileManager.deleteAllEnvelopes()
         
         sut = fixture.getSut()
     }
@@ -63,7 +71,9 @@ class SentryHubTests: XCTestCase {
     override func tearDown() {
         fixture.fileManager.deleteCurrentSession()
         fixture.fileManager.deleteCrashedSession()
+        fixture.fileManager.deleteAppState()
         fixture.fileManager.deleteTimestampLastInForeground()
+        fixture.fileManager.deleteAllEnvelopes()
     }
 
     func testBeforeBreadcrumbWithoutCallbackStoresBreadcrumb() {
@@ -73,7 +83,7 @@ class SentryHubTests: XCTestCase {
             level: .error,
             category: "default")
         hub.add(crumb)
-        let scope = hub.getScope()
+        let scope = hub.scope
         let scopeBreadcrumbs = scope.serialize()["breadcrumbs"]
         XCTAssertNotNil(scopeBreadcrumbs)
     }
@@ -88,8 +98,7 @@ class SentryHubTests: XCTestCase {
             level: .error,
             category: "default")
         sut.add(crumb)
-        let scope = sut.getScope()
-        let scopeBreadcrumbs = scope.serialize()["breadcrumbs"]
+        let scopeBreadcrumbs = sut.scope.serialize()["breadcrumbs"]
         XCTAssertNil(scopeBreadcrumbs)
     }
     
@@ -137,7 +146,7 @@ class SentryHubTests: XCTestCase {
     }
     
     func testAddBreadcrumb_WithCallbackReturnsNil() {
-        let options = Options()
+        let options = fixture.options
         options.beforeBreadcrumb = { _ in
             return nil
         }
@@ -145,13 +154,12 @@ class SentryHubTests: XCTestCase {
         
         hub.add(fixture.crumb)
         
-        let scope = hub.getScope()
-        XCTAssertNil(scope.serialize()["breadcrumbs"])
+        XCTAssertNil(hub.scope.serialize()["breadcrumbs"])
     }
     
     func testAddBreadcrumb_WithCallbackModifies() {
         let crumbMessage = "modified"
-        let options = Options()
+        let options = fixture.options
         options.beforeBreadcrumb = { crumb in
             crumb.message = crumbMessage
             return crumb
@@ -160,8 +168,7 @@ class SentryHubTests: XCTestCase {
         
         hub.add(fixture.crumb)
         
-        let scope = hub.getScope()
-        let scopeBreadcrumbs = scope.serialize()["breadcrumbs"] as? [[String: Any]]
+        let scopeBreadcrumbs = hub.scope.serialize()["breadcrumbs"] as? [[String: Any]]
         XCTAssertNotNil(scopeBreadcrumbs)
         XCTAssertEqual(1, scopeBreadcrumbs?.count)
         XCTAssertEqual(crumbMessage, scopeBreadcrumbs?.first?["message"] as? String)
@@ -174,10 +181,8 @@ class SentryHubTests: XCTestCase {
         let user = User()
         user.userId = "123"
         hub.setUser(user)
-        
-        let scope = hub.getScope()
 
-        let scopeSerialized = scope.serialize()
+        let scopeSerialized = hub.scope.serialize()
         let scopeUser = scopeSerialized["user"] as? [String: Any?]
         let scopeUserId = scopeUser?["id"] as? String
 
@@ -189,8 +194,8 @@ class SentryHubTests: XCTestCase {
         
         XCTAssertEqual(1, fixture.client.captureEventWithScopeArguments.count)
         if let eventArguments = fixture.client.captureEventWithScopeArguments.first {
-            XCTAssertEqual(fixture.event.eventId, eventArguments.first.eventId)
-            XCTAssertEqual(fixture.scope, eventArguments.second)
+            XCTAssertEqual(fixture.event.eventId, eventArguments.event.eventId)
+            XCTAssertEqual(fixture.scope, eventArguments.scope)
         }
     }
     
@@ -199,18 +204,102 @@ class SentryHubTests: XCTestCase {
         
         XCTAssertEqual(1, fixture.client.captureEventWithScopeArguments.count)
         if let eventArguments = fixture.client.captureEventWithScopeArguments.first {
-            XCTAssertEqual(fixture.event.eventId, eventArguments.first.eventId)
-            XCTAssertEqual(Scope(), eventArguments.second)
+            XCTAssertEqual(fixture.event.eventId, eventArguments.event.eventId)
+            XCTAssertEqual(Scope(), eventArguments.scope)
         }
     }
     
+    func testStartTransactionWithNameOperation() {
+        let span = fixture.getSut().startTransaction(name: fixture.transactionName, operation: fixture.transactionOperation)
+        let tracer = Dynamic(span)
+        XCTAssertEqual(tracer.name, fixture.transactionName)
+        XCTAssertEqual(span.context.operation, fixture.transactionOperation)
+    }
+    
+    func testStartTransactionWithContext() {
+        let span = fixture.getSut().startTransaction(transactionContext: TransactionContext(name: fixture.transactionName, operation: fixture.transactionOperation))
+        
+        let tracer = Dynamic(span)
+        XCTAssertEqual(tracer.name, fixture.transactionName)
+        XCTAssertEqual(span.context.operation, fixture.transactionOperation)
+    }
+    
+    func testStartTransactionWithContextSamplingContext() {
+        var customSamplingContext: [String: Any]?
+        
+        let options = fixture.options
+        options.tracesSampler = {(context: SamplingContext) -> NSNumber in
+            customSamplingContext = context.customSamplingContext
+            return 0
+        }
+        
+        let span = fixture.getSut().startTransaction(transactionContext: TransactionContext(name: fixture.transactionName, operation: fixture.transactionOperation), customSamplingContext: ["customKey": "customValue"])
+        
+        let tracer = Dynamic(span)
+        XCTAssertEqual(tracer.name, fixture.transactionName)
+        XCTAssertEqual(customSamplingContext?["customKey"] as? String, "customValue")
+        XCTAssertEqual(span.context.operation, fixture.transactionOperation)
+    }
+    
+    func testStartTransactionNotSamplingUsingSampleRate() {
+        let options = fixture.options
+        options.tracesSampleRate = 0.49
+        
+        let hub = fixture.getSut(options)
+        Dynamic(hub).sampler.random = fixture.random
+        
+        let span = hub.startTransaction(name: fixture.transactionName, operation: fixture.transactionOperation)
+        
+        XCTAssertEqual(span.context.sampled, .no)
+    }
+    
+    func testStartTransactionSamplingUsingSampleRate() {
+        let options = fixture.options
+        options.tracesSampleRate = 0.5
+        
+        let hub = fixture.getSut()
+        Dynamic(hub).sampler.random = fixture.random
+        
+        let span = hub.startTransaction(name: fixture.transactionName, operation: fixture.transactionOperation)
+        
+        XCTAssertEqual(span.context.sampled, .yes)
+    }
+    
+    func testStartTransactionNotSamplingUsingTracesSampler() {
+        let options = fixture.options
+        options.tracesSampler = {(_: SamplingContext) -> NSNumber in
+            return 0.4
+        }
+        
+        let hub = fixture.getSut()
+        Dynamic(hub).sampler.random = fixture.random
+        
+        let span = hub.startTransaction(name: fixture.transactionName, operation: fixture.transactionOperation)
+        
+        XCTAssertEqual(span.context.sampled, .no)
+    }
+    
+    func testStartTransactionSamplingUsingTracesSampler() {
+        let options = fixture.options
+        options.tracesSampler = {(_: SamplingContext) -> NSNumber in
+            return 0.6
+        }
+        
+        let hub = fixture.getSut()
+        Dynamic(hub).sampler.random = fixture.random
+        
+        let span = hub.startTransaction(name: fixture.transactionName, operation: fixture.transactionOperation)
+        
+        XCTAssertEqual(span.context.sampled, .yes)
+    }
+        
     func testCaptureMessageWithScope() {
         fixture.getSut().capture(message: fixture.message, scope: fixture.scope)
         
         XCTAssertEqual(1, fixture.client.captureMessageWithScopeArguments.count)
         if let messageArguments = fixture.client.captureMessageWithScopeArguments.first {
-            XCTAssertEqual(fixture.message, messageArguments.first)
-            XCTAssertEqual(fixture.scope, messageArguments.second)
+            XCTAssertEqual(fixture.message, messageArguments.message)
+            XCTAssertEqual(fixture.scope, messageArguments.scope)
         }
     }
     
@@ -219,8 +308,8 @@ class SentryHubTests: XCTestCase {
         
         XCTAssertEqual(1, fixture.client.captureMessageWithScopeArguments.count)
         if let messageArguments = fixture.client.captureMessageWithScopeArguments.first {
-            XCTAssertEqual(fixture.message, messageArguments.first)
-            XCTAssertEqual(Scope(), messageArguments.second)
+            XCTAssertEqual(fixture.message, messageArguments.message)
+            XCTAssertEqual(Scope(), messageArguments.scope)
         }
     }
     
@@ -229,8 +318,8 @@ class SentryHubTests: XCTestCase {
         
         XCTAssertEqual(1, fixture.client.captureErrorWithScopeArguments.count)
         if let errorArguments = fixture.client.captureErrorWithScopeArguments.first {
-            XCTAssertEqual(fixture.error, errorArguments.first as NSError)
-            XCTAssertEqual(fixture.scope, errorArguments.second)
+            XCTAssertEqual(fixture.error, errorArguments.error as NSError)
+            XCTAssertEqual(fixture.scope, errorArguments.scope)
         }
     }
     
@@ -241,14 +330,12 @@ class SentryHubTests: XCTestCase {
         
         XCTAssertEqual(1, fixture.client.captureErrorWithSessionArguments.count)
         if let errorArguments = fixture.client.captureErrorWithSessionArguments.first {
-            let actualSession = errorArguments.second
+            XCTAssertEqual(fixture.error, errorArguments.error as NSError)
             
-            XCTAssertEqual(fixture.error, errorArguments.first as NSError)
+            XCTAssertEqual(1, errorArguments.session.errors)
+            XCTAssertEqual(SentrySessionStatus.ok, errorArguments.session.status)
             
-            XCTAssertEqual(1, actualSession.errors)
-            XCTAssertEqual(SentrySessionStatus.ok, actualSession.status)
-            
-            XCTAssertEqual(fixture.scope, errorArguments.third)
+            XCTAssertEqual(fixture.scope, errorArguments.scope)
         }
         
         // only session init is sent
@@ -260,9 +347,8 @@ class SentryHubTests: XCTestCase {
         
         XCTAssertEqual(1, fixture.client.captureErrorWithScopeArguments.count)
         if let errorArguments = fixture.client.captureErrorWithScopeArguments.first {
-            XCTAssertEqual(fixture.error, errorArguments.first as NSError)
-            let actualScope = errorArguments.second
-            XCTAssertEqual(Scope(), actualScope)
+            XCTAssertEqual(fixture.error, errorArguments.error as NSError)
+            XCTAssertEqual(Scope(), errorArguments.scope)
         }
     }
     
@@ -271,8 +357,8 @@ class SentryHubTests: XCTestCase {
         
         XCTAssertEqual(1, fixture.client.captureExceptionWithScopeArguments.count)
         if let errorArguments = fixture.client.captureExceptionWithScopeArguments.first {
-            XCTAssertEqual(fixture.exception, errorArguments.first)
-            XCTAssertEqual(fixture.scope, errorArguments.second)
+            XCTAssertEqual(fixture.exception, errorArguments.exception)
+            XCTAssertEqual(fixture.scope, errorArguments.scope)
         }
     }
     
@@ -281,9 +367,8 @@ class SentryHubTests: XCTestCase {
         
         XCTAssertEqual(1, fixture.client.captureExceptionWithScopeArguments.count)
         if let errorArguments = fixture.client.captureExceptionWithScopeArguments.first {
-            XCTAssertEqual(fixture.exception, errorArguments.first)
-            let actualScope = errorArguments.second
-            XCTAssertEqual(Scope(), actualScope)
+            XCTAssertEqual(fixture.exception, errorArguments.exception)
+            XCTAssertEqual(Scope(), errorArguments.scope)
         }
     }
     
@@ -294,13 +379,12 @@ class SentryHubTests: XCTestCase {
         
         XCTAssertEqual(1, fixture.client.captureExceptionWithSessionArguments.count)
         if let exceptionArguments = fixture.client.captureExceptionWithSessionArguments.first {
-            XCTAssertEqual(fixture.exception, exceptionArguments.first)
+            XCTAssertEqual(fixture.exception, exceptionArguments.exception)
             
-            let actualSession = exceptionArguments.second
-            XCTAssertEqual(1, actualSession.errors)
-            XCTAssertEqual(SentrySessionStatus.ok, actualSession.status)
+            XCTAssertEqual(1, exceptionArguments.session.errors)
+            XCTAssertEqual(SentrySessionStatus.ok, exceptionArguments.session.status)
             
-            XCTAssertEqual(fixture.scope, exceptionArguments.third)
+            XCTAssertEqual(fixture.scope, exceptionArguments.scope)
         }
         
         // only session init is sent
@@ -316,9 +400,9 @@ class SentryHubTests: XCTestCase {
         }
         
         XCTAssertEqual(10, fixture.client.captureExceptionWithSessionArguments.count)
-        for i in Array(0...9) {
+        for i in 0...9 {
             let arguments = fixture.client.captureExceptionWithSessionArguments[i]
-            XCTAssertEqual(i + 1, Int(arguments.second.errors))
+            XCTAssertEqual(i + 1, Int(arguments.session.errors))
         }
     }
     
@@ -331,9 +415,9 @@ class SentryHubTests: XCTestCase {
         }
         
         XCTAssertEqual(10, fixture.client.captureErrorWithSessionArguments.count)
-        for i in Array(0...9) {
+        for i in 0...9 {
             let arguments = fixture.client.captureErrorWithSessionArguments[i]
-            XCTAssertEqual(i + 1, Int(arguments.second.errors))
+            XCTAssertEqual(i + 1, Int(arguments.session.errors))
         }
     }
     
@@ -365,7 +449,7 @@ class SentryHubTests: XCTestCase {
         
         // Make sure further crash events are sent
         sut.captureCrash(fixture.event)
-        assertEventSent()
+        assertCrashEventSent()
     }
     
     func testCaptureCrashEvent_CrashedSessionDoesNotExist() {
@@ -373,7 +457,7 @@ class SentryHubTests: XCTestCase {
         sut.captureCrash(fixture.event)
 
         assertNoCrashedSessionSent()
-        assertEventSent()
+        assertCrashEventSent()
     }
     
     /**
@@ -382,7 +466,7 @@ class SentryHubTests: XCTestCase {
     func testCatpureCrashEvent_CrashExistsButNoSessionExists() {
         sut.captureCrash(fixture.event)
         
-        assertEventSent()
+        assertCrashEventSent()
     }
     
     func testCaptureCrashEvent_WithoutExistingSessionAndAutoSessionTrackingEnabled() {
@@ -390,7 +474,7 @@ class SentryHubTests: XCTestCase {
         
         sut.captureCrash(fixture.event)
         
-        assertEventSent()
+        assertCrashEventSent()
     }
     
     func testCaptureCrashEvent_SessionExistsButAutoSessionTrackingDisabled() {
@@ -399,7 +483,7 @@ class SentryHubTests: XCTestCase {
     
         sut.captureCrash(fixture.event)
         
-        assertEventSent()
+        assertCrashEventSent()
     }
     
     func testCaptureCrashEvent_ClientIsNil() {
@@ -410,6 +494,73 @@ class SentryHubTests: XCTestCase {
         sut.captureCrash(fixture.event)
         
         assertNoEventsSent()
+    }
+    
+    func testCaptureEnvelope_WithEventWithError() {
+        sut.startSession()
+        
+        captureEventEnvelope(level: SentryLevel.error)
+        
+        assertSessionWithIncrementedErrorCountedAdded()
+    }
+    
+    func testCaptureEnvelope_WithEventWithFatal() {
+        sut.startSession()
+        
+        captureEventEnvelope(level: SentryLevel.fatal)
+        
+        assertSessionWithIncrementedErrorCountedAdded()
+    }
+    
+    func testCaptureEnvelope_WithEventWithNoLevel() throws {
+        sut.startSession()
+        
+        let envelope = try givenEnvelopeWithModifiedEvent { eventDict in
+            eventDict.removeValue(forKey: "level")
+        }
+        sut.capture(envelope: envelope)
+        
+        assertSessionWithIncrementedErrorCountedAdded()
+    }
+    
+    func testCaptureEnvelope_WithEventWithGarbageLevel() throws {
+        sut.startSession()
+        
+        let envelope = try givenEnvelopeWithModifiedEvent { eventDict in
+            eventDict["level"] = "Garbage"
+        }
+        sut.capture(envelope: envelope)
+        
+        assertSessionWithIncrementedErrorCountedAdded()
+    }
+    
+    func testCaptureEnvelope_WithEventWithFatal_SessionNotStarted() {
+        captureEventEnvelope(level: SentryLevel.fatal)
+        
+        assertNoSessionAddedToCapturedEnvelope()
+    }
+    
+    func testCaptureEnvelope_WithEventWithWarning() {
+        sut.startSession()
+        
+        captureEventEnvelope(level: SentryLevel.warning)
+        
+        assertNoSessionAddedToCapturedEnvelope()
+    }
+    
+    func testCaptureEnvelope_WithClientNil() {
+        sut.bindClient(nil)
+        captureEventEnvelope(level: SentryLevel.warning)
+        
+        assertNoEnvelopesCaptured()
+    }
+    
+    func testCaptureEnvelope_WithSession() {
+        let envelope = SentryEnvelope(session: SentrySession(releaseName: ""))
+        sut.capture(envelope: envelope)
+        
+        XCTAssertEqual(1, fixture.client.capturedEnvelopes.count)
+        XCTAssertEqual(envelope, fixture.client.capturedEnvelopes.first)
     }
 
     private func addBreadcrumbThroughConfigureScope(_ hub: SentryHub) {
@@ -430,7 +581,7 @@ class SentryHubTests: XCTestCase {
         let queue = DispatchQueue(label: "SentryHubTests", qos: .utility, attributes: [.concurrent, .initiallyInactive])
 
         let group = DispatchGroup()
-        for _ in Array(0...count - 1) {
+        for _ in 0...count - 1 {
             group.enter()
             queue.async {
                 capture(sut)
@@ -440,6 +591,12 @@ class SentryHubTests: XCTestCase {
 
         queue.activate()
         group.waitWithTimeout()
+    }
+    
+    private func captureEventEnvelope(level: SentryLevel) {
+        let event = TestData.event
+        event.level = level
+        sut.capture(envelope: SentryEnvelope(event: event))
     }
     
     private func givenCrashedSession() {
@@ -455,13 +612,23 @@ class SentryHubTests: XCTestCase {
         sut = fixture.getSut(options)
     }
     
+    private func givenEnvelopeWithModifiedEvent(modifyEventDict: (inout [String: Any]) -> Void) throws -> SentryEnvelope {
+        let event = TestData.event
+        let envelopeItem = SentryEnvelopeItem(event: event)
+        var eventDict = try JSONSerialization.jsonObject(with: envelopeItem.data) as! [String: Any]
+        
+        modifyEventDict(&eventDict)
+        
+        let eventData = try JSONSerialization.data(withJSONObject: eventDict)
+        return SentryEnvelope(header: SentryEnvelopeHeader(id: event.eventId), items: [SentryEnvelopeItem(header: envelopeItem.header, data: eventData)])
+    }
+    
     private func advanceTime(bySeconds: TimeInterval) {
         fixture.currentDateProvider.setDate(date: fixture.currentDateProvider.date().addingTimeInterval(bySeconds))
     }
 
     private func assert(withScopeBreadcrumbsCount count: Int, with hub: SentryHub) {
-        let scope = hub.getScope()
-        let scopeBreadcrumbs = scope.serialize()["breadcrumbs"] as? [AnyHashable]
+        let scopeBreadcrumbs = hub.scope.serialize()["breadcrumbs"] as? [AnyHashable]
         XCTAssertNotNil(scopeBreadcrumbs)
         XCTAssertEqual(scopeBreadcrumbs?.count, count)
     }
@@ -478,27 +645,51 @@ class SentryHubTests: XCTestCase {
     
     private func assertNoEventsSent() {
         XCTAssertEqual(0, fixture.client.captureEventArguments.count)
-        XCTAssertEqual(0, fixture.client.captureEventWithSessionArguments.count)
+        XCTAssertEqual(0, fixture.client.captureCrashEventWithSessionArguments.count)
     }
     
     private func assertEventSent() {
         let arguments = fixture.client.captureEventWithScopeArguments
         XCTAssertEqual(1, arguments.count)
-        XCTAssertEqual(fixture.event, arguments.first?.first)
+        XCTAssertEqual(fixture.event, arguments.first?.event)
+    }
+    
+    private func assertCrashEventSent() {
+        let arguments = fixture.client.captureCrashEventArguments
+        XCTAssertEqual(1, arguments.count)
+        XCTAssertEqual(fixture.event, arguments.first?.event)
     }
 
     private func assertEventSentWithSession() {
-        let arguments = fixture.client.captureEventWithSessionArguments
+        let arguments = fixture.client.captureCrashEventWithSessionArguments
         XCTAssertEqual(1, arguments.count)
 
         let argument = arguments.first
-        XCTAssertEqual(fixture.event, argument?.first)
+        XCTAssertEqual(fixture.event, argument?.event)
 
-        let session = argument?.second
+        let session = argument?.session
         XCTAssertEqual(fixture.currentDateProvider.date(), session?.timestamp)
         XCTAssertEqual(SentrySessionStatus.crashed, session?.status)
         XCTAssertEqual(fixture.options.environment, session?.environment)
 
-        XCTAssertEqual(fixture.scope, argument?.third)
+        XCTAssertEqual(fixture.scope, argument?.scope)
+    }
+    
+    private func assertSessionWithIncrementedErrorCountedAdded() {
+        XCTAssertEqual(1, fixture.client.capturedEnvelopes.count)
+        let envelope = fixture.client.capturedEnvelopes.first!
+        XCTAssertEqual(2, envelope.items.count)
+        let session = SentrySerialization.session(with: envelope.items[1].data)
+        XCTAssertEqual(1, session?.errors)
+    }
+    
+    private func assertNoSessionAddedToCapturedEnvelope() {
+        XCTAssertEqual(1, fixture.client.capturedEnvelopes.count)
+        let envelope = fixture.client.capturedEnvelopes.first!
+        XCTAssertEqual(1, envelope.items.count)
+    }
+    
+    private func assertNoEnvelopesCaptured() {
+        XCTAssertEqual(0, fixture.client.capturedEnvelopes.count)
     }
 }

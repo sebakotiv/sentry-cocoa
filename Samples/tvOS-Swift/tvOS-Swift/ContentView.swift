@@ -41,6 +41,41 @@ struct ContentView: View {
         SentrySDK.capture(exception: exception, scope: scope)
     }
     
+    var captureTransactionAction: () -> Void = {
+        let transaction = SentrySDK.startTransaction(name: "Some Transaction", operation: "some operation")
+        DispatchQueue.main.asyncAfter(deadline: .now() + Double.random(in: 0.4...0.6), execute: {
+            transaction.finish()
+        })
+    }
+
+    func asyncCrash1() {
+        DispatchQueue.main.async {
+            self.asyncCrash2()
+        }
+    }
+
+    func asyncCrash2() {
+        DispatchQueue.main.async {
+            SentrySDK.crash()
+        }
+    }
+
+    var oomCrashAction: () -> Void = {
+        DispatchQueue.main.async {
+            let megaByte = 1_024 * 1_024
+            let memoryPageSize = NSPageSize()
+            let memoryPages = megaByte / memoryPageSize
+
+            while true {
+                // Allocate one MB and set one element of each memory page to something.
+                let ptr = UnsafeMutablePointer<Int8>.allocate(capacity: megaByte)
+                for i in 0..<memoryPages {
+                    ptr[i * memoryPageSize] = 40
+                }
+            }
+        }
+    }
+
     var body: some View {
         VStack {
             Button(action: addBreadcrumbAction) {
@@ -63,14 +98,28 @@ struct ContentView: View {
                 Text("Capture NSException")
             }
             
+            Button(action: captureTransactionAction) {
+                Text("Capture Transaction")
+            }
+
             Button(action: {
                 SentrySDK.crash()
             }) {
                 Text("Crash")
             }
             
+            Button(action: {
+                DispatchQueue.main.async {
+                    self.asyncCrash1()
+                }
+            }) {
+                Text("Async Crash")
+            }
+
+            Button(action: oomCrashAction) {
+                Text("OOM Crash")
+            }
         }
-        
     }
 }
 

@@ -1,6 +1,10 @@
 import XCTest
 
 class SentrySerializationTests: XCTestCase {
+    
+    private class Fixture {
+        static var invalidData = "hi".data(using: .utf8)!
+    }
 
     func testSentryEnvelopeSerializer_WithSingleEvent() {
         // Arrange
@@ -144,6 +148,77 @@ class SentrySerializationTests: XCTestCase {
     func testSentryEnvelopeSerializer_WithoutLineBreak() {
         let itemData = "{}".data(using: .utf8)!
         XCTAssertNil(SentrySerialization.envelope(with: itemData))
+    }
+    
+    func testSerializeSession() throws {
+        let dict = SentrySession(releaseName: "1.0.0").serialize()
+        let session = SentrySession(jsonObject: dict)!
+        
+        let data = try SentrySerialization.data(with: session)
+        
+        XCTAssertNotNil(SentrySerialization.session(with: data))
+    }
+    
+    func testSerializeSessionWithNoReleaseName() throws {
+        var dict = SentrySession(releaseName: "1.0.0").serialize()
+        dict["attrs"] = nil // Remove release name
+        let session = SentrySession(jsonObject: dict)!
+        
+        let data = try SentrySerialization.data(with: session)
+        
+        XCTAssertNil(SentrySerialization.session(with: data))
+    }
+    
+    func testSerializeSessionWithEmptyReleaseName() throws {
+        let dict = SentrySession(releaseName: "").serialize()
+        let session = SentrySession(jsonObject: dict)!
+        
+        let data = try SentrySerialization.data(with: session)
+        
+        XCTAssertNil(SentrySerialization.session(with: data))
+    }
+    
+    func testSerializeSessionWithGarbageInDict() throws {
+        var dict = SentrySession(releaseName: "").serialize()
+        dict["started"] = "20"
+        let data = try SentrySerialization.data(withJSONObject: dict)
+        
+        XCTAssertNil(SentrySerialization.session(with: data))
+    }
+    
+    func testSerializeSessionWithGarbage() throws {
+        guard let data = "started".data(using: .ascii) else {
+            XCTFail("Failed to create data"); return
+        }
+        
+        XCTAssertNil(SentrySerialization.session(with: data))
+    }
+    
+    func testLevelFromEventData() {
+        let envelopeItem = SentryEnvelopeItem(event: TestData.event)
+        
+        let level = SentrySerialization.level(from: envelopeItem.data)
+        XCTAssertEqual(TestData.event.level, level)
+    }
+    
+    func testLevelFromEventData_WithGarbage() {
+        let level = SentrySerialization.level(from: Fixture.invalidData)
+        XCTAssertEqual(SentryLevel.error, level)
+    }
+    
+    func testAppStateWithValidData_ReturnsValidAppState() throws {
+        let appState = TestData.appState
+        let appStateData = try SentrySerialization.data(withJSONObject: appState.serialize())
+        
+        let actual = SentrySerialization.appState(with: appStateData)
+        
+        XCTAssertEqual(appState, actual)
+    }
+    
+    func testAppStateWithInvalidData_ReturnsNil() throws {
+        let actual = SentrySerialization.appState(with: Fixture.invalidData)
+        
+        XCTAssertNil(actual)
     }
 
     private func serializeEnvelope(envelope: SentryEnvelope) -> Data {

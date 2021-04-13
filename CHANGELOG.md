@@ -1,6 +1,175 @@
 # Changelog
 
-## unreleased
+## 7.0.0-beta.0
+
+- feat: Add close method to SDK #1046
+
+## 7.0.0-alpha.5
+
+### Breaking Changes
+
+- ref: Add SentryMechanismMeta #1048: Replaced dict `SentryMechanism.meta` with new class `SentryMechanismMeta`. Moved `SenryNSError` to `SentryMechanismMeta`.
+
+### Features and Fixes
+
+- feat: Async callstacks are being tracked by wrapping the `dispatch_async` and related APIs. #998
+- feat: Add transaction to the scope #992
+- fix: Pass SentryTracer to span child #1040
+- feat: Add span to SentrySDK #1042
+- feat: Add urlSessionDelegate option to SentryOptions #965
+
+## 7.0.0-alpha.4
+
+### Breaking Changes
+
+- ref: Align SentryException with unified API #1026: Replaced `SentryException.thread` with `SentryException.threadId` and `SentryException.stacktrace`.
+- ref: Remove deprecated SentryHub.getScope #1025: Use `SentryHub.scope` instead.
+- ref: Make closeCachedSessionWithTimestamp private #1022
+- ref: Improve envelope API for Hybrid SDKs #1020: We removed `SentryClient.storeEnvelope`, which is reserved for Hybrid SDKs.
+- ref: Remove currentHub from SentrySDK #1019: We removed `SentrySDK.currentHub` and `SentrySDK.setCurrentHub`. In case you need this methods, please open up an issue.
+- feat: Add maxCacheItems #1017: This changes the maximum number of cached envelopes from 100 to 30. You can configure this number with `SentryOptions.maxCacheItems`.
+
+### Features and Fixes
+
+- perf: Avoid allocating dict in BreadcrumbTracker #1027
+- feat: Add start and endSession to SentrySDK #1021
+- fix: Crash when passing garbage to maxBreadcrumbs #1018
+- fix: OutOfMemory exception type #1015
+- fix: macOS version for Mac Catalyst #1011
+
+## 7.0.0-alpha.3
+
+- feat: Out Of Memory Tracking #1001
+
+## 7.0.0-alpha.2
+
+### Features
+
+- feat: Performance Monitoring API (#909, #977, #961, #932, #919)
+
+### Breaking Changes
+
+- SentryEvent.timestamp changed to nullable.
+
+## 7.0.0-alpha.1
+
+Features and fixes:
+
+- ref: Add read-only scope property to Hub #975
+
+### Breaking Changes
+
+- ref: Add read-only scope property to Hub #975
+- ref: Remove SentryException.userReported #974
+- ref: Replace SentryLogLevel with SentryLevel #978
+
+### Migrating from 6.x to 7.x
+
+We replaced the `SentryLogLevel` with `SentryLevel`, renamed `logLevel` to `diagnosticLevel`
+on `SentryOptions` to align with other Sentry SDKs, and set the default `diagnosticLevel` to
+`SentryLevel.debug`. Furthermore, we removed setting the `logLevel` statically on the `SentrySDK`.
+Please use the `SentryOptions` to set the `diagnosticLevel` instead.
+
+6.x
+```swift
+SentrySDK.start { options in
+  options.logLevel = SentryLogLevel.verbose
+}
+
+// Or
+
+SentrySDK.logLevel = SentryLogLevel.verbose
+```
+
+7.x
+```swift
+SentrySDK.start { options in
+  options.diagnosticLevel = SentryLevel.debug
+}
+```
+
+__Internal Note__: Move this migration guide to the docs before GA.
+
+## 7.0.0-alpha.0
+
+**Breaking Change**: This version introduces a change to the grouping of issues. The SDK now sets the `inApp`
+flag for frames originating from only the main executable using [CFBundleExecutable](https://developer.apple.com/documentation/bundleresources/information_property_list/cfbundleexecutable). 
+In previous versions, all frames originating from the application bundle were marked as `inApp`. This had the
+downside of marking frames of private frameworks inside the bundle as `inApp`. This problem is fixed now.
+Applications using static frameworks shouldn't be affected by this change. 
+For more information on marking frames as inApp [docs](https://docs.sentry.io/platforms/apple/data-management/event-grouping/stack-trace-rules/#mark-in-app-frames).
+
+- fix: Mark frames as inApp #956
+
+## 6.2.1
+
+- fix: Redundant x29 GP register on arm64 and UBSan crash #964
+
+## 6.2.0
+
+With this version, Sentry groups errors by domain and code. MyDomain 1 and MyDomain 2
+are going to be two separate issues in Sentry. If you are using self-hosted Sentry,
+it requires Sentry version >= v21.2.0 to work. Staying on Sentry < v21.2.0 and upgrading
+to this version of the SDK won't do any damage. Sentry will group like in previous
+versions, but you will see a new group because we slightly changed the wording. If you
+are using sentry.io no action is needed. In case you are not satisfied with this change,
+you can take a look at
+[SDK fingerprinting](https://docs.sentry.io/platforms/apple/data-management/event-grouping/sdk-fingerprinting/)
+to group by domain only.
+
+- fix: Use mechanism meta for error grouping #946
+- fix: Sanitize SentryMechanism.data on serialize #947
+- feat: Add error to SentryEvent #944
+- fix: Mark SentryEvent.message as Nullable #943
+- fix: Stacktrace inApp marking on Simulators #942
+- feat: Group NSError by domain and code #941
+- fix: Discard Sessions when JSON is faulty #939
+- feat: Add sendDefaultPii to SentryOptions #923
+
+## 6.1.4
+
+- fix: Sessions for Hybrid SDKs #913
+
+## 6.1.3
+
+- fix: Capture envelope updates session state #906
+
+## 6.1.2
+
+- fix: Clash with KSCrash functions #905
+
+## 6.1.1
+
+- fix: Duplicate symbol clash with KSCrash #902
+
+## 6.1.0
+
+- perf: Improve locks in SentryScope #888
+
+## 6.1.0-alpha.1
+
+- fix: Change maxAttachmentSize from MiB to bytes #891
+- feat: Add maxAttachmentSize to SentryOptions #887
+- ref: Remove SentryAttachment.isEqual and hash #885
+- ref: Remove SentryScope.isEqual and hash #884
+
+## 6.1.0-alpha.0
+
+- feat: Add basic support for attachments #875
+
+## 6.0.12
+
+- fix: Crash in SentrySession.serialize #870
+
+## 6.0.11
+
+- perf: Drop global dispatch queue (#869)
+- fix: Increase precision of iso8601 date formatter #860
+
+## 6.0.10
+
+- feat: Add onCrashedLastRun #808
+- feat: Add SentrySdkInfo to SentryOptions #859
 
 ## 6.0.9
 
@@ -57,7 +226,7 @@
 ## 6.0.0
 
 This is a major bump with lots of internal improvements and a few breaking changes.
-For a detailed explanation  how to updgrade please checkout the [migration guide](MIGRATION.md).
+For a detailed explanation  how to updgrade please checkout the [migration guide](https://docs.sentry.io/platforms/apple/migration/).
 
 Breaking changes:
 

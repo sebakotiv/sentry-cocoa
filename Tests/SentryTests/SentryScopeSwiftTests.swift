@@ -8,7 +8,8 @@ class SentryScopeSwiftTests: XCTestCase {
         let scope: Scope
         let date: Date
         let event: Event
-
+        let transaction: Span
+        
         let dist = "dist"
         let environment = "environment"
         let fingerprint = ["fingerprint"]
@@ -17,7 +18,7 @@ class SentryScopeSwiftTests: XCTestCase {
         let extra = ["key": "value"]
         let level = SentryLevel.info
         let ipAddress = "127.0.0.1"
-        
+        let transactionName = "Some Transaction"
         let maxBreadcrumbs = 5
 
         init() {
@@ -49,8 +50,12 @@ class SentryScopeSwiftTests: XCTestCase {
             scope.setLevel(level)
             scope.add(breadcrumb)
             
+            scope.add(TestData.fileAttachment)
+            
             event = Event()
             event.message = SentryMessage(formatted: "message")
+            
+            transaction = SentryTracer(transactionContext: TransactionContext(name: transactionName, operation: "op"), hub: nil)
         }
         
         var dateAs8601String: String {
@@ -61,50 +66,6 @@ class SentryScopeSwiftTests: XCTestCase {
     }
     
     private let fixture = Fixture()
-
-    func testHash() {
-        let fixture2 = Fixture()
-        XCTAssertEqual(fixture.scope.hash(), fixture2.scope.hash())
-        
-        let scope2 = fixture2.scope
-        scope2.setEnvironment("other environment")
-        XCTAssertNotEqual(fixture.scope.hash(), scope2.hash())
-    }
-    
-    func testIsEqualToSelf() {
-        XCTAssertEqual(fixture.scope, fixture.scope)
-        XCTAssertTrue(fixture.scope.isEqual(to: fixture.scope))
-    }
-    
-    func testIsNotEqualToOtherClass() {
-        XCTAssertFalse(fixture.scope.isEqual(1))
-    }
-
-    func testIsEqualToOtherInstanceWithSameValues() {
-        let fixture2 = Fixture()
-        XCTAssertEqual(fixture.scope, fixture2.scope)
-    }
-    
-    func testNotIsEqual() {
-        testIsNotEqual { scope in scope.setUser(User()) }
-        testIsNotEqual { scope in scope.setTag(value: "h", key: "a") }
-        testIsNotEqual { scope in scope.setExtra(value: "h", key: "a") }
-        testIsNotEqual { scope in scope.setContext(value: ["some": "context"], key: "hello") }
-        testIsNotEqual { scope in scope.setDist("") }
-        testIsNotEqual { scope in scope.setEnvironment("") }
-        testIsNotEqual { scope in scope.setFingerprint([]) }
-        testIsNotEqual { scope in scope.add(Breadcrumb()) }
-        testIsNotEqual { scope in scope.clear() }
-        testIsNotEqual { scope in scope.setLevel(SentryLevel.error) }
-
-        XCTAssertNotEqual(Scope(maxBreadcrumbs: fixture.maxBreadcrumbs), Scope(maxBreadcrumbs: 4))
-    }
-    
-    private func testIsNotEqual(block: (Scope) -> Void ) {
-        let scope = Fixture().scope
-        block(scope)
-        XCTAssertNotEqual(fixture.scope, scope)
-    }
     
     func testSerialize() {
         let scope = fixture.scope
@@ -120,6 +81,8 @@ class SentryScopeSwiftTests: XCTestCase {
         scope.setFingerprint([])
         scope.setLevel(SentryLevel.debug)
         scope.clearBreadcrumbs()
+        scope.add(TestData.fileAttachment)
+        scope.span = fixture.transaction
         
         XCTAssertEqual(["key": "value"], actual["tags"] as? [String: String])
         XCTAssertEqual(["key": "value"], actual["extra"] as? [String: String])
@@ -132,7 +95,7 @@ class SentryScopeSwiftTests: XCTestCase {
         XCTAssertEqual(fixture.environment, actual["environment"] as? String)
         XCTAssertEqual(fixture.fingerprint, actual["fingerprint"] as? [String])
         XCTAssertEqual("info", actual["level"] as? String)
-        
+        XCTAssertNil(actual["transaction"])
         XCTAssertNotNil(actual["breadcrumbs"])
     }
     
@@ -226,6 +189,21 @@ class SentryScopeSwiftTests: XCTestCase {
         XCTAssertEqual(event.environment, actual?.environment)
     }
     
+    func testUseSpan() {
+        fixture.scope.span = fixture.transaction
+        fixture.scope.useSpan { (span) in
+            XCTAssert(span === self.fixture.transaction)
+        }
+    }
+    
+    func testUseSpanForClear() {
+        fixture.scope.span = fixture.transaction
+        fixture.scope.useSpan { (span) in
+            self.fixture.scope.span = nil
+        }
+        XCTAssertNil(fixture.scope.span)
+    }
+    
     func testApplyToEvent_EventWithContext() {
         let context = NSMutableDictionary(dictionary: ["my": ["extra": "context"]])
         let event = fixture.event
@@ -237,12 +215,100 @@ class SentryScopeSwiftTests: XCTestCase {
         XCTAssertEqual(context as? [String: [String: String]],
                        actual?.context as? [String: [String: String]])
     }
-    
+        
     func testClear() {
         let scope = fixture.scope
         scope.clear()
         
         let expected = Scope(maxBreadcrumbs: fixture.maxBreadcrumbs)
         XCTAssertEqual(expected, scope)
+        XCTAssertEqual(0, scope.attachments.count)
+    }
+    
+    func testAttachmentsIsACopy() {
+        let scope = fixture.scope
+        
+        let attachments = scope.attachments
+        scope.add(TestData.fileAttachment)
+        
+        XCTAssertEqual(1, attachments.count)
+    }
+    
+    // Altough we only run this test above the below specified versions, we exped the
+    // implementation to be thread safe
+    // With this test we test if modifications from multiple threads don't lead to a crash.
+    @available(tvOS 10.0, *)
+    @available(OSX 10.12, *)
+    @available(iOS 10.0, *)
+    func testModifyingFromMultipleThreads() {
+        let queue = DispatchQueue(label: "SentryScopeTests", qos: .userInteractive, attributes: [.concurrent, .initiallyInactive])
+        let group = DispatchGroup()
+        
+        let scope = fixture.scope
+        
+        for _ in 0...20 {
+            group.enter()
+            queue.async {
+                
+                // The number is kept small for the CI to not take to long.
+                // If you really want to test this increase to 100_000 or so.
+                for _ in 0...1_000 {
+                    
+                    // Simulate some real world modifications of the user
+                    
+                    let key = "key"
+                    
+                    _ = Scope(scope: scope)
+                    
+                    for _ in 0...100 {
+                        scope.add(self.fixture.breadcrumb)
+                    }
+                    
+                    scope.serialize()
+                    scope.clearBreadcrumbs()
+                    scope.add(self.fixture.breadcrumb)
+                    
+                    scope.apply(to: SentrySession(releaseName: "1.0.0"))
+                    
+                    scope.setFingerprint(nil)
+                    scope.setFingerprint(["finger", "print"])
+                    
+                    scope.setContext(value: ["some": "value"], key: key)
+                    scope.removeContext(key: key)
+                    
+                    scope.setExtra(value: 1, key: key)
+                    scope.removeExtra(key: key)
+                    scope.setExtras(["value": "1", "value2": "2"])
+                    
+                    scope.apply(to: TestData.event, maxBreadcrumb: 5)
+                    
+                    scope.setTag(value: "value", key: key)
+                    scope.removeTag(key: key)
+                    scope.setTags(["tag1": "hello", "tag2": "hello"])
+                    
+                    scope.add(TestData.fileAttachment)
+                    
+                    for _ in 0...10 {
+                        scope.add(self.fixture.breadcrumb)
+                    }
+                    scope.serialize()
+                    
+                    scope.setUser(self.fixture.user)
+                    scope.setDist("dist")
+                    scope.setEnvironment("env")
+                    scope.setLevel(SentryLevel.debug)
+                    
+                    scope.apply(to: SentrySession(releaseName: "1.0.0"))
+                    scope.apply(to: TestData.event, maxBreadcrumb: 5)
+                    
+                    scope.serialize()
+                }
+                
+                group.leave()
+            }
+        }
+        
+        queue.activate()
+        group.waitWithTimeout(timeout: 500)
     }
 }

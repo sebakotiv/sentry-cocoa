@@ -3,6 +3,8 @@
 import XCTest
 
 class SentryClientTest: XCTestCase {
+    
+    private static let dsn = TestConstants.dsnAsString(username: "SentryClientTest")
 
     private class Fixture {
         let transport = TestTransport()
@@ -12,7 +14,7 @@ class SentryClientTest: XCTestCase {
         )
         
         let threadInspector = SentryThreadInspector(
-            stacktraceBuilder: SentryStacktraceBuilder(sentryFrameRemover: SentryFrameRemover()),
+            stacktraceBuilder: SentryStacktraceBuilder(crashStackEntryMapper: SentryCrashStackEntryMapper(frameInAppLogic: SentryFrameInAppLogic(inAppIncludes: [], inAppExcludes: []))),
             andMachineContextWrapper: SentryCrashDefaultMachineContextWrapper()
         )
         
@@ -24,7 +26,7 @@ class SentryClientTest: XCTestCase {
         
         let user: User
         let fileManager: SentryFileManager
-
+        
         init() {
             session = SentrySession(releaseName: "release")
             session.incrementErrors()
@@ -36,15 +38,18 @@ class SentryClientTest: XCTestCase {
             
             user = User()
             user.email = "someone@sentry.io"
+            user.ipAddress = "127.0.0.1"
             
-            fileManager = try! SentryFileManager(dsn: TestConstants.dsn, andCurrentDateProvider: TestCurrentDateProvider())
+            let options = Options()
+            options.dsn = SentryClientTest.dsn
+            fileManager = try! SentryFileManager(options: options, andCurrentDateProvider: TestCurrentDateProvider())
         }
 
         func getSut(configureOptions: (Options) -> Void = { _ in }) -> Client {
             var client: Client!
             do {
                 let options = try Options(dict: [
-                    "dsn": TestConstants.dsnAsString
+                    "dsn": SentryClientTest.dsn
                 ])
                 configureOptions(options)
 
@@ -73,8 +78,20 @@ class SentryClientTest: XCTestCase {
                 let scope = Scope()
                 scope.setEnvironment(environment)
                 scope.setTag(value: "value", key: "key")
+                scope.add(TestData.dataAttachment)
+                scope.setContext(value: [SentryDeviceContextFreeMemoryKey: 2_000], key: "device")
                 return scope
             }
+        }
+        
+        var eventWithCrash: Event {
+            let event = TestData.event
+            let exception = Exception(value: "value", type: "type")
+            let mechanism = Mechanism(type: "mechanism")
+            mechanism.handled = false
+            exception.mechanism = mechanism
+            event.exceptions = [exception]
+            return event
         }
     }
 
@@ -88,6 +105,11 @@ class SentryClientTest: XCTestCase {
         super.setUp()
         fixture = Fixture()
         fixture.fileManager.deleteAllEnvelopes()
+    }
+    
+    override func tearDown() {
+        super.tearDown()
+        SentrySDK.crashedLastRunCalled = false
     }
     
     func testCaptureMessage() {
@@ -140,14 +162,14 @@ class SentryClientTest: XCTestCase {
             }
         }
     }
-    
+      
     func testCaptureEventWithException() {
         let event = Event()
         event.exceptions = [ Exception(value: "", type: "")]
         
         fixture.getSut().capture(event: event, scope: fixture.scope)
         
-        assertLastSentEvent { actual in
+        assertLastSentEventWithAttachment { actual in
             assertValidDebugMeta(actual: actual.debugMeta)
             assertValidThreads(actual: actual.threads)
         }
@@ -170,7 +192,7 @@ class SentryClientTest: XCTestCase {
             options.dsn = nil
         })
         
-        sut.options.dsn = TestConstants.dsnAsString
+        sut.options.dsn = SentryClientTest.dsn
         
         let eventId = sut.capture(event: event)
         eventId.assertIsNotEmpty()
@@ -226,8 +248,8 @@ class SentryClientTest: XCTestCase {
         }).capture(error: error, scope: fixture.scope)
         
         eventId.assertIsNotEmpty()
-        assertLastSentEvent { actual in
-            assertValidErrorEvent(actual)
+        assertLastSentEventWithAttachment { actual in
+            assertValidErrorEvent(actual, error)
         }
     }
     
@@ -237,9 +259,7 @@ class SentryClientTest: XCTestCase {
         eventId.assertIsNotEmpty()
         let error = TestError.invalidTest as NSError
         assertLastSentEvent { actual in
-            XCTAssertEqual("\(error.domain) \(error.code)", actual.message.formatted)
-            XCTAssertEqual("\(error.domain) %s", actual.message.message)
-            XCTAssertEqual(["\(error.code)"], actual.message.params)
+            assertValidErrorEvent(actual, error)
         }
     }
 
@@ -250,7 +270,7 @@ class SentryClientTest: XCTestCase {
 
         eventId.assertIsNotEmpty()
 
-        assertLastSentEvent { actual in
+        assertLastSentEventWithAttachment { actual in
             XCTAssertEqual(url.absoluteString, actual.context!["user info"]!["url"] as? String)
         }
     }
@@ -261,8 +281,8 @@ class SentryClientTest: XCTestCase {
         eventId.assertIsNotEmpty()
         XCTAssertNotNil(fixture.transport.sentEventsWithSession.last)
         if let eventWithSessionArguments = fixture.transport.sentEventsWithSession.last {
-            assertValidErrorEvent(eventWithSessionArguments.first)
-            XCTAssertEqual(fixture.session, eventWithSessionArguments.second)
+            assertValidErrorEvent(eventWithSessionArguments.event, error)
+            XCTAssertEqual(fixture.session, eventWithSessionArguments.session)
         }
     }
     
@@ -275,20 +295,91 @@ class SentryClientTest: XCTestCase {
         assertLastSentEnvelopeIsASession()
     }
 
-    func testCaptureEventWithSession() {
-        let eventId = fixture.getSut().capture(fixture.event, with: fixture.session, with: fixture.scope)
+    func testCaptureCrashEventWithSession() {
+        let eventId = fixture.getSut().captureCrash(fixture.event, with: fixture.session, with: fixture.scope)
 
         eventId.assertIsNotEmpty()
-        XCTAssertNotNil(fixture.transport.sentEventsWithSession.last)
-        if let eventWithSessionArguments = fixture.transport.sentEventsWithSession.last {
-            let event = eventWithSessionArguments.first
+        
+        assertLastSentEventWithSession { event, session in
             XCTAssertEqual(fixture.event.eventId, event.eventId)
             XCTAssertEqual(fixture.event.message, event.message)
             XCTAssertEqual("value", event.tags?["key"] ?? "")
 
-            XCTAssertEqual(fixture.session, eventWithSessionArguments.second)
+            XCTAssertEqual(fixture.session, session)
         }
+    }
+    
+    func testCaptureCrashWithSession_DoesntOverideStacktrace() {
+        let event = TestData.event
+        event.threads = nil
+        event.debugMeta = nil
+        
+        fixture.getSut().captureCrash(event, with: fixture.session, with: fixture.scope)
+        
+        assertLastSentEventWithSession { event, _ in
+            XCTAssertNil(event.threads)
+            XCTAssertNil(event.debugMeta)
+        }
+    }
+    
+    func testCaptureCrashEvent() {
+        let eventId = fixture.getSut().captureCrash(fixture.event, with: fixture.scope)
 
+        eventId.assertIsNotEmpty()
+        
+        assertLastSentEventWithAttachment { event in
+            XCTAssertEqual(fixture.event.eventId, event.eventId)
+            XCTAssertEqual(fixture.event.message, event.message)
+            XCTAssertEqual("value", event.tags?["key"] ?? "")
+        }
+    }
+    
+    func testCaptureOOMEvent_RemovesFreeMemoryFromContext() {
+        let oomEvent = TestData.oomEvent
+        
+        _ = fixture.getSut().captureCrash(oomEvent, with: fixture.scope)
+
+        assertLastSentEventWithAttachment { event in
+            XCTAssertEqual(oomEvent.eventId, event.eventId)
+            XCTAssertNil(event.context?["device"]?["free_memory"])
+        }
+    }
+    
+    func testCaptureOOMEvent_WithNoContext_ContextNotModified() {
+        let oomEvent = TestData.oomEvent
+        
+        _ = fixture.getSut().captureCrash(oomEvent, with: Scope())
+
+        assertLastSentEvent { event in
+            XCTAssertEqual(oomEvent.eventId, event.eventId)
+            XCTAssertEqual(oomEvent.context?.count, event.context?.count)
+        }
+    }
+    
+    func testCaptureOOMEvent_WithNoDeviceContext_ContextNotModified() {
+        let oomEvent = TestData.oomEvent
+        let scope = Scope()
+        scope.setContext(value: ["some": "thing"], key: "any")
+        
+        _ = fixture.getSut().captureCrash(oomEvent, with: scope)
+
+        assertLastSentEvent { event in
+            XCTAssertEqual(oomEvent.eventId, event.eventId)
+            XCTAssertEqual(oomEvent.context?.count, event.context?.count)
+        }
+    }
+    
+    func testCaptureCrash_DoesntOverideStacktraceFor() {
+        let event = TestData.event
+        event.threads = nil
+        event.debugMeta = nil
+        
+        fixture.getSut().captureCrash(event, with: fixture.scope)
+        
+        assertLastSentEventWithAttachment { actual in
+            XCTAssertNil(actual.threads)
+            XCTAssertNil(actual.debugMeta)
+        }
     }
 
     func testCaptureErrorWithUserInfo() {
@@ -297,7 +388,7 @@ class SentryClientTest: XCTestCase {
         let eventId = fixture.getSut().capture(error: error, scope: fixture.scope)
 
         eventId.assertIsNotEmpty()
-        assertLastSentEvent { actual in
+        assertLastSentEventWithAttachment { actual in
             XCTAssertEqual(expectedValue, actual.context!["user info"]!["key"] as? String)
         }
     }
@@ -308,26 +399,27 @@ class SentryClientTest: XCTestCase {
         }).capture(exception: exception, scope: fixture.scope)
         
         eventId.assertIsNotEmpty()
-        assertLastSentEvent { actual in
+        assertLastSentEventWithAttachment { actual in
             assertValidExceptionEvent(actual)
         }
     }
     
     func testCaptureExceptionWithSession() {
-        let eventId = fixture.getSut().capture(exception, with: fixture.session, with: Scope())
+        let eventId = fixture.getSut().capture(exception, with: fixture.session, with: fixture.scope)
         
         eventId.assertIsNotEmpty()
         XCTAssertNotNil(fixture.transport.sentEventsWithSession.last)
         if let eventWithSessionArguments = fixture.transport.sentEventsWithSession.last {
-            assertValidExceptionEvent(eventWithSessionArguments.first)
-            XCTAssertEqual(fixture.session, eventWithSessionArguments.second)
+            assertValidExceptionEvent(eventWithSessionArguments.event)
+            XCTAssertEqual(fixture.session, eventWithSessionArguments.session)
+            XCTAssertEqual([TestData.dataAttachment], eventWithSessionArguments.attachments)
         }
     }
     
     func testCaptureExceptionWithSession_WithBeforeSendReturnsNil() {
         let eventId = fixture.getSut(configureOptions: { options in
             options.beforeSend = { _ in return nil }
-        }).capture(exception, with: fixture.session, with: Scope())
+        }).capture(exception, with: fixture.session, with: fixture.scope)
         
         eventId.assertIsEmpty()
         assertLastSentEnvelopeIsASession()
@@ -339,7 +431,7 @@ class SentryClientTest: XCTestCase {
         let eventId = fixture.getSut().capture(exception: exception, scope: fixture.scope)
 
         eventId.assertIsNotEmpty()
-        assertLastSentEvent { actual in
+        assertLastSentEventWithAttachment { actual in
             XCTAssertEqual(expectedValue, actual.context!["user info"]!["key"] as? String)
         }
     }
@@ -348,7 +440,7 @@ class SentryClientTest: XCTestCase {
         let eventId = fixture.getSut().capture(message: fixture.messageAsString, scope: fixture.scope)
 
         eventId.assertIsNotEmpty()
-        assertLastSentEvent { actual in
+        assertLastSentEventWithAttachment { actual in
             XCTAssertEqual(fixture.environment, actual.environment)
         }
     }
@@ -366,7 +458,7 @@ class SentryClientTest: XCTestCase {
         fixture.getSut().capture(session: session)
         fixture.getSut().capture(exception, with: session, with: Scope())
             .assertIsNotEmpty()
-        fixture.getSut().capture(fixture.event, with: session, with: Scope())
+        fixture.getSut().captureCrash(fixture.event, with: session, with: Scope())
             .assertIsNotEmpty()
         
         // No sessions sent
@@ -459,7 +551,7 @@ class SentryClientTest: XCTestCase {
         _ = SentryEnvelope(event: Event())
         let eventId = fixture.getSut(configureOptions: { options in
             options.dsn = nil
-        }).capture(Event(), with: fixture.session, with: Scope())
+        }).captureCrash(Event(), with: fixture.session, with: fixture.scope)
 
         eventId.assertIsEmpty()
         assertNothingSent()
@@ -469,7 +561,7 @@ class SentryClientTest: XCTestCase {
         _ = SentryEnvelope(event: Event())
         let eventId = fixture.getSut(configureOptions: { options in
             options.dsn = nil
-        }).capture(self.exception, with: fixture.session, with: Scope())
+        }).capture(self.exception, with: fixture.session, with: fixture.scope)
 
         eventId.assertIsEmpty()
         assertNothingSent()
@@ -479,7 +571,7 @@ class SentryClientTest: XCTestCase {
         _ = SentryEnvelope(event: Event())
         let eventId = fixture.getSut(configureOptions: { options in
             options.dsn = nil
-        }).captureError(self.error, with: fixture.session, with: Scope())
+        }).captureError(self.error, with: fixture.session, with: fixture.scope)
 
         eventId.assertIsEmpty()
         assertNothingSent()
@@ -540,14 +632,14 @@ class SentryClientTest: XCTestCase {
         let optionsEnvironment = "environment"
         let event = Event()
         event.environment = "event"
-        let scope = Scope()
+        let scope = fixture.scope
         scope.setEnvironment("scope")
         let eventId = fixture.getSut(configureOptions: { options in
             options.environment = optionsEnvironment
         }).capture(event: event, scope: scope)
 
         eventId.assertIsNotEmpty()
-        assertLastSentEvent { actual in
+        assertLastSentEventWithAttachment { actual in
             XCTAssertEqual("event", actual.environment)
         }
     }
@@ -570,7 +662,7 @@ class SentryClientTest: XCTestCase {
         SentryFileManager.prepareInitError()
         
         let options = Options()
-        options.dsn = TestConstants.dsnAsString
+        options.dsn = SentryClientTest.dsn
         let client = Client(options: options)
         
         XCTAssertNil(client)
@@ -587,11 +679,11 @@ class SentryClientTest: XCTestCase {
     }
     
     func testInstallationIdNotSetWhenUserIsSetWithoutId() {
-        let scope = Scope()
+        let scope = fixture.scope
         scope.setUser(fixture.user)
         fixture.getSut().capture(message: "any message", scope: scope)
         
-        assertLastSentEvent { actual in
+        assertLastSentEventWithAttachment { actual in
             XCTAssertEqual(fixture.user.userId, actual.user?.userId)
             XCTAssertEqual(fixture.user.email, actual.user?.email)
         }
@@ -610,9 +702,78 @@ class SentryClientTest: XCTestCase {
         }
     }
     
+    func testSendDefaultPiiEnabled_GivenNoIP_AutoIsSet() {
+        fixture.getSut(configureOptions: { options in
+            options.sendDefaultPii = true
+        }).capture(message: "any")
+        
+        assertLastSentEvent { actual in
+            XCTAssertEqual("{{auto}}", actual.user?.ipAddress)
+        }
+    }
+    
+    func testSendDefaultPiiEnabled_GivenIP_IPAddressNotChanged() {
+        let scope = Scope()
+        scope.setUser(fixture.user)
+        
+        fixture.getSut(configureOptions: { options in
+            options.sendDefaultPii = true
+        }).capture(message: "any", scope: scope)
+        
+        assertLastSentEvent { actual in
+            XCTAssertEqual(fixture.user.ipAddress, actual.user?.ipAddress)
+        }
+    }
+    
+    func testSendDefaultPiiDisabled_GivenIP_IPAddressNotChanged() {
+        let scope = Scope()
+        scope.setUser(fixture.user)
+        
+        fixture.getSut().capture(message: "any", scope: scope)
+        
+        assertLastSentEvent { actual in
+            XCTAssertEqual(fixture.user.ipAddress, actual.user?.ipAddress)
+        }
+    }
+    
     func testStoreEnvelope_StoresEnvelopeToDisk() {
         fixture.getSut().store(SentryEnvelope(event: Event()))
         XCTAssertEqual(1, fixture.fileManager.getAllEnvelopes().count)
+    }
+    
+    func testOnCrashedLastRun_OnCaptureCrashWithSession() {
+        let event = TestData.event
+        
+        var onCrashedLastRunCalled = false
+        fixture.getSut(configureOptions: { options in
+            options.onCrashedLastRun = { _ in
+                onCrashedLastRunCalled = true
+            }
+        }).captureCrash(event, with: fixture.session, with: fixture.scope)
+        
+        XCTAssertTrue(onCrashedLastRunCalled)
+    }
+    
+    func testOnCrashedLastRun_WithTwoCrashes_OnlyInvokeCallbackOnce() {
+        let event = TestData.event
+        
+        var onCrashedLastRunCalled = false
+        let client = fixture.getSut(configureOptions: { options in
+            options.onCrashedLastRun = { crashEvent in
+                onCrashedLastRunCalled = true
+                XCTAssertEqual(event.eventId, crashEvent.eventId)
+            }
+        })
+        
+        client.captureCrash(event, with: fixture.scope)
+        client.captureCrash(TestData.event, with: fixture.scope)
+        
+        XCTAssertTrue(onCrashedLastRunCalled)
+    }
+    
+    func testOnCrashedLastRun_WithoutCallback_DoesNothing() {
+        let client = fixture.getSut()
+        client.captureCrash(TestData.event, with: fixture.scope)
     }
     
     private func givenEventWithDebugMeta() -> Event {
@@ -638,24 +799,59 @@ class SentryClientTest: XCTestCase {
     }
     
     private func assertEventNotSent(eventId: SentryId?) {
-        let eventWasSent = fixture.transport.sentEvents.contains { event in
-            event.eventId == eventId
+        let eventWasSent = fixture.transport.sentEvents.contains { eventArguments in
+            eventArguments.event.eventId == eventId
         }
         XCTAssertFalse(eventWasSent)
     }
 
     private func assertLastSentEvent(assert: (Event) -> Void) {
         XCTAssertNotNil(fixture.transport.sentEvents.last)
-        if let lastSentEvent = fixture.transport.sentEvents.last {
-            assert(lastSentEvent)
+        if let lastSentEventArguments = fixture.transport.sentEvents.last {
+            assert(lastSentEventArguments.event)
         }
     }
     
-    private func assertValidErrorEvent(_ event: Event) {
+    private func assertLastSentEventWithAttachment(assert: (Event) -> Void) {
+        XCTAssertNotNil(fixture.transport.sentEvents.last)
+        if let lastSentEventArguments = fixture.transport.sentEvents.last {
+            assert(lastSentEventArguments.event)
+            
+            XCTAssertEqual([TestData.dataAttachment], lastSentEventArguments.attachments)
+        }
+    }
+    
+    private func assertLastSentEventWithSession(assert: (Event, SentrySession) -> Void) {
+        XCTAssertNotNil(fixture.transport.sentEventsWithSession.last)
+        if let args = fixture.transport.sentEventsWithSession.last {
+            assert(args.event, args.session)
+        }
+    }
+    
+    private func assertValidErrorEvent(_ event: Event, _ error: NSError) {
         XCTAssertEqual(SentryLevel.error, event.level)
-        XCTAssertEqual("\(error.domain) \(error.code)", event.message.formatted)
-        XCTAssertEqual("\(error.domain) %s", event.message.message)
-        XCTAssertEqual(["\(error.code)"], event.message.params)
+        XCTAssertEqual(error, event.error as NSError?)
+        
+        guard let exceptions = event.exceptions else {
+            XCTFail("Event should contain one exception"); return
+        }
+        XCTAssertEqual(1, exceptions.count)
+        let exception = exceptions[0]
+        XCTAssertEqual(error.domain, exception.type)
+        
+        XCTAssertEqual("Code: \(error.code)", exception.value)
+        
+        XCTAssertNil(exception.threadId)
+        XCTAssertNil(exception.stacktrace)
+        
+        guard let mechanism = exception.mechanism else {
+            XCTFail("Exception doesn't contain a mechanism"); return
+        }
+        XCTAssertEqual("NSError", mechanism.type)
+        XCTAssertNotNil(mechanism.meta?.error)
+        XCTAssertEqual(error.domain, mechanism.meta?.error?.domain)
+        XCTAssertEqual(error.code, mechanism.meta?.error?.code)
+        
         assertValidDebugMeta(actual: event.debugMeta)
         assertValidThreads(actual: event.threads)
     }
@@ -690,22 +886,22 @@ class SentryClientTest: XCTestCase {
     
     private func assertValidThreads(actual: [Sentry.Thread]?) {
         let expected = fixture.threadInspector.getCurrentThreads()
-
+        XCTAssertEqual(expected.count, actual?.count)
+        
         // We can only compare the stacktrace up to the test method. Therefore we
         // need to remove a few frames for the stacktraces.
-        removeFrames(threads: expected)
-        removeFrames(threads: actual ?? [])
+        removeFrames(thread: expected[0])
+        removeFrames(thread: actual![0])
         
-        XCTAssertEqual(expected.count, actual?.count)
-        XCTAssertEqual(expected, actual ?? [])
+        XCTAssertEqual(expected, actual)
     }
 
-    private func removeFrames(threads: [Sentry.Thread]) {
-        var actualFrames = threads[0].stacktrace?.frames ?? []
+    private func removeFrames(thread: Sentry.Thread) {
+        var actualFrames = thread.stacktrace?.frames ?? []
         XCTAssertTrue(actualFrames.count > 1, "Event has no stacktrace.")
         if actualFrames.count > 1 {
             actualFrames.removeLast(3)
-            threads[0].stacktrace?.frames = actualFrames
+            thread.stacktrace?.frames = actualFrames
         }
     }
 

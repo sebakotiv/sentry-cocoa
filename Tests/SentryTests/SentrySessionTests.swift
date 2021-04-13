@@ -27,7 +27,9 @@ class SentrySessionTestsSwift: XCTestCase {
         
         let date = currentDateProvider.date().addingTimeInterval(2)
         json["timestamp"] = (date as NSDate).sentry_toIso8601String()
-        let session = SentrySession(jsonObject: json)
+        guard let session = SentrySession(jsonObject: json) else {
+            XCTFail("Couldn't create session from JSON"); return
+        }
         
         let sessionSerialized = session.serialize()
         let duration = sessionSerialized["duration"] as? Double ?? -1
@@ -47,5 +49,51 @@ class SentrySessionTestsSwift: XCTestCase {
         // The user is copied as well
         session.user?.email = "someone_else@sentry.io"
         XCTAssertNotEqual(session, copiedSession)
+    }
+    
+    func testInitWithJson_Status_MapsToCorrectStatus() {
+        func testStatus(status: SentrySessionStatus, statusAsString: String) {
+            let expected = SentrySession(releaseName: "release")
+            var serialized = expected.serialize()
+            serialized["status"] = statusAsString
+            let actual = SentrySession(jsonObject: serialized)!
+            XCTAssertEqual(status, actual.status)
+        }
+        
+        testStatus(status: SentrySessionStatus.ok, statusAsString: "ok")
+        testStatus(status: SentrySessionStatus.exited, statusAsString: "exited")
+        testStatus(status: SentrySessionStatus.crashed, statusAsString: "crashed")
+        testStatus(status: SentrySessionStatus.abnormal, statusAsString: "abnormal")
+    }
+    
+    func testInitWithJson_IfJsonMissesField_SessionIsNil() {
+        withValue { $0["sid"] = nil }
+        withValue { $0["started"] = nil }
+        withValue { $0["status"] = nil }
+        withValue { $0["seq"] = nil }
+        withValue { $0["errors"] = nil }
+        withValue { $0["did"] = nil }
+    }
+    
+    func testInitWithJson_IfJsonContainsWrongFields_SessionIsNil() {
+        withValue { $0["sid"] = 20 }
+        withValue { $0["started"] = 20 }
+        withValue { $0["status"] = 20 }
+        withValue { $0["seq"] = "nil" }
+        withValue { $0["errors"] = "nil" }
+        withValue { $0["did"] = 20 }
+    }
+    
+    func testInitWithJson_IfJsonContainsWrongValues_SessionIsNil() {
+        withValue { $0["sid"] = "" }
+        withValue { $0["started"] = "20" }
+        withValue { $0["status"] = "20" }
+    }
+    
+    func withValue(setValue: (inout [String: Any]) -> Void) {
+        let expected = SentrySession(releaseName: "release")
+        var serialized = expected.serialize()
+        setValue(&serialized)
+        XCTAssertNil(SentrySession(jsonObject: serialized))
     }
 }

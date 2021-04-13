@@ -7,13 +7,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         
         SentrySDK.start { options in
-            options.dsn = "https://387714a4f3654858a6f0ff63fd551485@o447951.ingest.sentry.io/5428557"
+            options.dsn = "https://a92d50327ac74b8b9aa4ea80eccfb267@o447951.ingest.sentry.io/5428557"
             options.beforeSend = { event in
                 return event
             }
             options.debug = true
-            options.logLevel = SentryLogLevel.verbose
-            options.attachStacktrace = true
+            // Sampling 100% - In Production you probably want to adjust this
+            options.tracesSampleRate = 1.0
             options.sessionTrackingIntervalMillis = 5_000
         }
         

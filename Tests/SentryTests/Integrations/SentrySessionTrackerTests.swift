@@ -3,6 +3,9 @@ import XCTest
 
 class SentrySessionTrackerTests: XCTestCase {
     
+    private static let dsnAsString = TestConstants.dsnAsString(username: "SentrySessionTrackerTests")
+    private static let dsn = TestConstants.dsn(username: "SentrySessionTrackerTests")
+    
     private class Fixture {
         
         let options: Options
@@ -12,7 +15,7 @@ class SentrySessionTrackerTests: XCTestCase {
         
         init() {
             options = Options()
-            options.dsn = TestConstants.dsnAsString
+            options.dsn = SentrySessionTrackerTests.dsnAsString
             options.releaseName = "SentrySessionTrackerIntegrationTests"
             options.sessionTrackingIntervalMillis = 10_000
             options.environment = "debug"
@@ -27,7 +30,7 @@ class SentrySessionTrackerTests: XCTestCase {
         }
         
         func setNewHubToSDK() {
-            let hub = SentryHub(client: client, andScope: nil, andSentryCrashWrapper: self.sentryCrash)
+            let hub = SentryHub(client: client, andScope: nil, andCrashAdapter: self.sentryCrash)
             SentrySDK.setCurrentHub(hub)
         }
     }
@@ -42,7 +45,7 @@ class SentrySessionTrackerTests: XCTestCase {
         
         fixture = Fixture()
         
-        fileManager = try! SentryFileManager(dsn: TestConstants.dsn, andCurrentDateProvider: TestCurrentDateProvider())
+        fileManager = try! SentryFileManager(options: fixture.options, andCurrentDateProvider: TestCurrentDateProvider())
         fileManager.deleteCurrentSession()
         fileManager.deleteCrashedSession()
         fileManager.deleteTimestampLastInForeground()
@@ -61,6 +64,33 @@ class SentrySessionTrackerTests: XCTestCase {
     
     func testOnlyForeground() {
         sut.start()
+        goToForeground()
+        
+        assertInitSessionSent()
+        assertSessionStored()
+    }
+    
+    func testOnlyHybridSdkDidBecomeActive() {
+        sut.start()
+        TestNotificationCenter.hybridSdkDidBecomeActive()
+        
+        assertInitSessionSent()
+        assertSessionStored()
+    }
+    
+    func testForeground_And_HybridSdkDidBecomeActive() {
+        sut.start()
+        goToForeground()
+        TestNotificationCenter.hybridSdkDidBecomeActive()
+        
+        assertInitSessionSent()
+        assertSessionStored()
+    }
+    
+    func testHybridSdkDidBecomeActive_and_Foreground() {
+        sut.start()
+        TestNotificationCenter.hybridSdkDidBecomeActive()
+        
         goToForeground()
         
         assertInitSessionSent()
@@ -448,9 +478,9 @@ class SentrySessionTrackerTests: XCTestCase {
     }
     
     private func assertNoInitSessionSent() {
-        let eventWithSessions = fixture.client.captureEventWithSessionArguments.map({ triple in triple.second })
-        let errorWithSessions = fixture.client.captureErrorWithSessionArguments.map({ triple in triple.second })
-        let exceptionWithSessions = fixture.client.captureExceptionWithSessionArguments.map({ triple in triple.second })
+        let eventWithSessions = fixture.client.captureCrashEventWithSessionArguments.map({ triple in triple.session })
+        let errorWithSessions = fixture.client.captureErrorWithSessionArguments.map({ triple in triple.session })
+        let exceptionWithSessions = fixture.client.captureExceptionWithSessionArguments.map({ triple in triple.session })
         
         var sessions = fixture.client.sessions + eventWithSessions + errorWithSessions + exceptionWithSessions
         
@@ -462,7 +492,7 @@ class SentrySessionTrackerTests: XCTestCase {
     }
     
     private func assertSessionsSent(count: Int) {
-        let eventWithSessions = fixture.client.captureEventWithSessionArguments.count
+        let eventWithSessions = fixture.client.captureCrashEventWithSessionArguments.count
         let errorWithSessions = fixture.client.captureErrorWithSessionArguments.count
         let exceptionWithSessions = fixture.client.captureExceptionWithSessionArguments.count
         let sessions = fixture.client.sessions.count
@@ -496,7 +526,7 @@ class SentrySessionTrackerTests: XCTestCase {
         sut.start()
         SentrySDK.captureCrash(Event())
         
-        if let session = fixture.client.captureEventWithSessionArguments.last?.second {
+        if let session = fixture.client.captureCrashEventWithSessionArguments.last?.session {
             assertSession(session: session, started: sessionStartTime, status: SentrySessionStatus.crashed, duration: 5)
         } else {
             XCTFail("No session sent with event.")

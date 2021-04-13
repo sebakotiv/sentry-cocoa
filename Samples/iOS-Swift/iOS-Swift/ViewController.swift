@@ -13,10 +13,18 @@ class ViewController: UIViewController {
             let user = Sentry.User(userId: "1")
             user.email = "tony@example.com"
             scope.setUser(user)
+            
+            if let path = Bundle.main.path(forResource: "Tongariro", ofType: "jpg") {
+                scope.add(Attachment(path: path, filename: "Tongariro.jpg", contentType: "image/jpeg"))
+            }
+            if let data = "hello".data(using: .utf8) {
+                scope.add(Attachment(data: data, filename: "log.txt"))
+            }
+            
         }
         // Also works
         let user = Sentry.User(userId: "1")
-        user.email = "tony@example.com"
+        user.email = "tony1@example.com"
         SentrySDK.setUser(user)
     }
     
@@ -49,13 +57,15 @@ class ViewController: UIViewController {
     }
     
     @IBAction func captureError(_ sender: Any) {
-        let error = NSError(domain: "SampleErrorDomain", code: 1, userInfo: [NSLocalizedDescriptionKey: "Object does not exist"])
-
-        SentrySDK.capture(error: error) { (scope) in
-            // Changes in here will only be captured for this event
-            // The scope in this callback is a clone of the current scope
-            // It contains all data but mutations only influence the event being sent
-            scope.setTag(value: "value", key: "myTag")
+        do {
+            try RandomErrorGenerator.generate()
+        } catch {
+            SentrySDK.capture(error: error) { (scope) in
+                // Changes in here will only be captured for this event
+                // The scope in this callback is a clone of the current scope
+                // It contains all data but mutations only influence the event being sent
+                scope.setTag(value: "value", key: "myTag")
+            }
         }
     }
     
@@ -70,7 +80,48 @@ class ViewController: UIViewController {
         SentrySDK.capture(exception: exception, scope: scope)
     }
     
+    @IBAction func captureTransaction(_ sender: Any) {
+        let transaction = SentrySDK.startTransaction(name: "Some Transaction", operation: "Some Operation")
+        DispatchQueue.main.asyncAfter(deadline: .now() + Double.random(in: 0.4...0.6), execute: {
+            transaction.finish()
+        })
+    }
+   
     @IBAction func crash(_ sender: Any) {
         SentrySDK.crash()
+    }
+    
+    @IBAction func asyncCrash(_ sender: Any) {
+        DispatchQueue.main.async {
+            self.asyncCrash1()
+        }
+    }
+    
+    func asyncCrash1() {
+        DispatchQueue.main.async {
+            self.asyncCrash2()
+        }
+    }
+    
+    func asyncCrash2() {
+        DispatchQueue.main.async {
+            SentrySDK.crash()
+        }
+    }
+
+    @IBAction func oomCrash(_ sender: Any) {
+        DispatchQueue.main.async {
+            let megaByte = 1_024 * 1_024
+            let memoryPageSize = NSPageSize()
+            let memoryPages = megaByte / memoryPageSize
+
+            while true {
+                // Allocate one MB and set one element of each memory page to something.
+                let ptr = UnsafeMutablePointer<Int8>.allocate(capacity: megaByte)
+                for i in 0..<memoryPages {
+                    ptr[i * memoryPageSize] = 40
+                }
+            }
+        }
     }
 }

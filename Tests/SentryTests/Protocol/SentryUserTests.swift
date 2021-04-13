@@ -1,35 +1,11 @@
 import XCTest
 
 class SentryUserTests: XCTestCase {
-    
-    private class Fixture {
-        
-        let date: Date
-        let user: User
-        
-        init() {
-            date = Date(timeIntervalSince1970: 10)
-            
-            user = User(userId: "id")
-            user.email = "user@sentry.io"
-            user.username = "user123"
-            user.ipAddress = "127.0.0.1"
-            user.data = ["some": ["data": "data", "date": date]]
-        }
-        
-        var dateAs8601String: String {
-            get {
-                return (date as NSDate).sentry_toIso8601String()
-            }
-        }
-    }
-    
-    private let fixture = Fixture()
-    
+
     func testSerializationWithAllProperties() {
-        let user = fixture.user.copy() as! User
+        let user = TestData.user.copy() as! User
         let actual = user.serialize()
-        
+
         // Changing the original doesn't modify the serialized
         user.userId = ""
         user.email = ""
@@ -37,11 +13,11 @@ class SentryUserTests: XCTestCase {
         user.ipAddress = ""
         user.data?.removeAll()
         
-        XCTAssertEqual(fixture.user.userId, actual["id"] as? String)
-        XCTAssertEqual(fixture.user.email, actual["email"] as? String)
-        XCTAssertEqual(fixture.user.username, actual["username"] as? String)
-        XCTAssertEqual(fixture.user.ipAddress, actual["ip_address"] as? String)
-        XCTAssertEqual(["some": ["data": "data", "date": fixture.dateAs8601String]], actual["data"] as? Dictionary)
+        XCTAssertEqual(TestData.user.userId, actual["id"] as? String)
+        XCTAssertEqual(TestData.user.email, actual["email"] as? String)
+        XCTAssertEqual(TestData.user.username, actual["username"] as? String)
+        XCTAssertEqual(TestData.user.ipAddress, actual["ip_address"] as? String)
+        XCTAssertEqual(["some": ["data": "data", "date": TestData.timestampAs8601String]], actual["data"] as? Dictionary)
     }
     
     func testSerializationWithOnlyId() {
@@ -53,25 +29,24 @@ class SentryUserTests: XCTestCase {
     }
     
     func testHash() {
-        let fixture2 = Fixture()
-        XCTAssertEqual(fixture.user.hash(), fixture2.user.hash())
+        XCTAssertEqual(TestData.user.hash(), TestData.user.hash())
         
-        let user2 = fixture2.user
+        let user2 = TestData.user
         user2.email = "some"
-        XCTAssertNotEqual(fixture.user.hash(), user2.hash())
+        XCTAssertNotEqual(TestData.user.hash(), user2.hash())
     }
     
     func testIsEqualToSelf() {
-        XCTAssertEqual(fixture.user, fixture.user)
-        XCTAssertTrue(fixture.user.isEqual(to: fixture.user))
+        XCTAssertEqual(TestData.user, TestData.user)
+        XCTAssertTrue(TestData.user.isEqual(to: TestData.user))
     }
     
     func testIsNotEqualToOtherClass() {
-        XCTAssertFalse(fixture.user.isEqual(1))
+        XCTAssertFalse(TestData.user.isEqual(1))
     }
     
     func testIsEqualToCopy() {
-        XCTAssertEqual(fixture.user, fixture.user.copy() as! User)
+        XCTAssertEqual(TestData.user, TestData.user.copy() as! User)
     }
     
     func testNotIsEqual() {
@@ -83,8 +58,70 @@ class SentryUserTests: XCTestCase {
     }
     
     func testIsNotEqual(block: (User) -> Void ) {
-        let user = fixture.user.copy() as! User
+        let user = TestData.user.copy() as! User
         block(user)
-        XCTAssertNotEqual(fixture.user, user)
+        XCTAssertNotEqual(TestData.user, user)
+    }
+    
+    func testCopyWithZone_CopiesDeepCopy() {
+        let user = TestData.user
+        let copiedUser = user.copy() as! User
+        
+        // Modifying the original does not change the copy
+        user.userId = ""
+        user.email = ""
+        user.username = ""
+        user.ipAddress = ""
+        user.data = [:]
+        
+        XCTAssertEqual(TestData.user, copiedUser)
+    }
+    
+    // Altough we only run this test above the below specified versions, we exped the
+    // implementation to be thread safe
+    // With this test we test if modifications from multiple threads don't lead to a crash.
+    @available(tvOS 10.0, *)
+    @available(OSX 10.12, *)
+    @available(iOS 10.0, *)
+    func testModifyingFromMultipleThreads() {
+        let queue = DispatchQueue(label: "SentryScopeTests", qos: .userInteractive, attributes: [.concurrent, .initiallyInactive])
+        let group = DispatchGroup()
+        
+        let user = TestData.user.copy() as! User
+        
+        for i in 0...20 {
+            group.enter()
+            queue.async {
+                
+                // The number is kept small for the CI to not take to long.
+                // If you really want to test this increase to 100_000 or so.
+                for _ in 0...1_000 {
+                    
+                    // Simulate some real world modifications of the user
+                    
+                    user.userId = "\(i)"
+                    
+                    // Trigger is equal
+                    user.isEqual(to: TestData.user)
+                    user.serialize()
+                    
+                    user.serialize()
+                    
+                    user.email = "john@example.com"
+                    user.username = "\(i)"
+                    user.ipAddress = "\(i)"
+                    
+                    user.data?["\(i)"] = "\(i)"
+                    
+                    // Trigger hash
+                    XCTAssertNotNil([user: user])
+                }
+                
+                group.leave()
+            }
+        }
+        
+        queue.activate()
+        group.waitWithTimeout()
     }
 }
